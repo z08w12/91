@@ -71,18 +71,13 @@ export function VideosPage() {
     <section>
       <header className="admin-page__header">
         <h1 className="admin-page__title">视频管理</h1>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div className="admin-page__actions admin-videos-filter">
           <select
+            className="admin-videos-filter__select"
             value={driveId}
             onChange={(e) => {
               setDriveId(e.target.value);
               setPage(1);
-            }}
-            style={{
-              border: "1px solid var(--color-line)",
-              borderRadius: 3,
-              minWidth: 180,
-              padding: "8px 10px",
             }}
           >
             <option value="">全部网盘</option>
@@ -93,31 +88,12 @@ export function VideosPage() {
               </option>
             ))}
           </select>
-          <div
-            style={{
-              position: "relative",
-              display: "flex",
-              alignItems: "center",
-            }}
-          >
-            <Search
-              size={14}
-              style={{
-                position: "absolute",
-                left: 10,
-                color: "#aaa",
-              }}
-            />
+          <div className="admin-videos-filter__search">
+            <Search size={14} className="admin-videos-filter__search-icon" />
             <input
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               placeholder="搜索标题 / 作者"
-              style={{
-                padding: "8px 10px 8px 30px",
-                border: "1px solid var(--color-line)",
-                borderRadius: 3,
-                minWidth: 240,
-              }}
             />
           </div>
           <button className="admin-btn" onClick={refresh}>
@@ -158,7 +134,7 @@ export function VideosPage() {
       )}
 
       {!loading && (
-        <div className="admin-form__help" style={{ margin: "-10px 0 14px" }}>
+        <div className="admin-videos-summary">
           {driveId
             ? `${driveNameMap.get(driveId) ?? driveId}：共 ${total} 个视频，第 ${page} / ${totalPages} 页，显示 ${pageStart}-${pageEnd}`
             : `全部网盘：共 ${total} 个视频，第 ${page} / ${totalPages} 页，显示 ${pageStart}-${pageEnd}`}
@@ -191,14 +167,14 @@ export function VideosPage() {
               {filtered.map((v) => (
                 <tr key={v.id}>
                   <td>
-                    <div style={{ fontWeight: 600 }}>{v.title}</div>
+                    <div className="admin-video-title">{v.title}</div>
                     {fileMeta(v) && (
-                      <div style={{ color: "#999", fontSize: 12 }}>
+                      <div className="admin-video-filemeta">
                         {fileMeta(v)}
                       </div>
                     )}
                   </td>
-                  <td>{v.author || <span style={{ color: "#aaa" }}>—</span>}</td>
+                  <td>{v.author || <span className="admin-text-faint">—</span>}</td>
                   <td>
                     <div className="admin-pills">
                       {(v.tags ?? []).map((t) => (
@@ -212,7 +188,7 @@ export function VideosPage() {
                   <td>
                     <PreviewStatus s={v.previewStatus} />
                   </td>
-                  <td style={{ fontFamily: "ui-monospace", fontSize: 12 }}>
+                  <td className="admin-mono-cell">
                     {driveNameMap.get(v.driveId) ?? v.driveId}
                   </td>
                   <td className="is-actions">
@@ -227,15 +203,7 @@ export function VideosPage() {
               ))}
             </tbody>
           </table>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              alignItems: "center",
-              gap: 8,
-              marginTop: 12,
-            }}
-          >
+          <div className="admin-table-pagination">
             <button
               className="admin-btn"
               onClick={() => setPage(1)}
@@ -250,7 +218,7 @@ export function VideosPage() {
             >
               上一页
             </button>
-            <span className="admin-form__help" style={{ margin: 0 }}>
+            <span className="admin-table-pagination__info">
               第 {page} / {totalPages} 页，每页 {PAGE_SIZE} 个
             </span>
             <button

@@ -20,3 +20,7 @@ tools/
 # 注意：backend/vendor/ 是 Go modules vendor 目录，故意入库
 # 目的是让任何人 clone 后断网也能直接 go build
 # 不要加 `vendor/` 或 `backend/vendor/` 到这里
+
+# 编译产物
+backend/server
+

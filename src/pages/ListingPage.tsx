@@ -11,7 +11,8 @@ import { Pagination } from "@/components/Pagination";
 import { fetchListing } from "@/data/videos";
 import type { SortKey, VideoItem } from "@/types";
 
-const PAGE_SIZE = 24;
+const PAGE_SIZE_DEFAULT = 24;
+const PAGE_SIZE_TAG = 12;
 const LISTING_STATE_PREFIX = "video-site:list-state:";
 
 type ListingState = {
@@ -64,7 +65,7 @@ export default function ListingPage() {
 
     let active = true;
     setLoading(true);
-    fetchListing(page, PAGE_SIZE, { q: keyword, tag, cat, sort }).then((r) => {
+    fetchListing(page, tag ? PAGE_SIZE_TAG : PAGE_SIZE_DEFAULT, { q: keyword, tag, cat, sort }).then((r) => {
       if (!active) return;
       setItems(r.items ?? []);
       setTotal(r.total ?? 0);
@@ -159,7 +160,7 @@ export default function ListingPage() {
         />
         <Pagination
           page={page}
-          pageSize={PAGE_SIZE}
+          pageSize={tag ? PAGE_SIZE_TAG : PAGE_SIZE_DEFAULT}
           total={total}
           onChange={(p) => {
             pendingScrollYRef.current = 0;

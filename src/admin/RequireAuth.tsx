@@ -9,14 +9,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 
   if (status === "loading") {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          display: "grid",
-          placeItems: "center",
-          color: "#888",
-        }}
-      >
+      <div className="admin-loading-screen">
         加载中...
       </div>
     );

@@ -1,14 +1,10 @@
+/* =========================================================
+ * Video card / grid
+ * ========================================================= */
 .video-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 0;
-}
-
-@media (min-width: 1440px) {
-  .video-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
+  gap: var(--space-4);
 }
 
 @media (max-width: 1024px) {
@@ -24,61 +20,74 @@
   }
 }
 
+/* ----- Compact 列表视图 ----- */
 .video-grid.is-compact {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .video-grid.is-compact .video-card {
-  display: block;
-  padding: 5px;
+  padding: 8px;
 }
 
 .video-grid.is-compact .video-card__link {
   display: grid;
-  grid-template-columns: 140px minmax(0, 1fr);
-  grid-template-rows: auto 1fr;
-  gap: 4px 10px;
+  grid-template-columns: 160px minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
+  gap: 4px var(--space-3);
   align-items: start;
 }
 
 .video-grid.is-compact .thumb-frame {
   grid-column: 1;
-  grid-row: 1 / span 2;
+  grid-row: 1 / span 3;
+  border-radius: var(--radius-sm);
 }
 
-.video-grid.is-compact .video-card .video-title {
+.video-grid.is-compact .video-title {
   grid-column: 2;
+  grid-row: 1;
+  margin-top: 4px;
   white-space: normal;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  margin-top: 0;
 }
 
 .video-grid.is-compact .video-meta {
   grid-column: 2;
+  grid-row: 2;
   flex-wrap: wrap;
-  margin-top: 0;
 }
 
+.video-grid.is-compact .video-card__source {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+/* =========================================================
+ * Card
+ * ========================================================= */
 .video-card {
+  position: relative;
   display: block;
-  background: var(--color-card);
-  border: 1px solid var(--color-card-border);
-  border-radius: 2px;
-  padding: 4px;
-  color: var(--color-text-invert);
-  transition: border-color 160ms ease, background-color 160ms ease;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 8px;
+  color: var(--text-default);
+  transition: transform var(--transition-normal), border-color var(--transition-normal),
+    box-shadow var(--transition-normal), background var(--transition-normal);
 }
 
 .video-card:hover,
 .video-card:focus-within {
-  background: #171717;
-  border-color: #545454;
-  color: var(--color-text-invert);
+  background: var(--bg-elevated);
+  border-color: var(--border-default);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
 }
 
 .video-card__link {
@@ -90,13 +99,16 @@
   color: inherit;
 }
 
+/* =========================================================
+ * Thumbnail
+ * ========================================================= */
 .thumb-frame {
   position: relative;
   aspect-ratio: 16 / 9;
   overflow: hidden;
   background: #000;
-  border: 1px solid #202020;
-  border-radius: 1px;
+  border-radius: var(--radius-sm);
+  isolation: isolate;
 }
 
 .thumb-image,
@@ -110,56 +122,120 @@
 
 .thumb-image {
   z-index: 1;
+  transition: transform var(--transition-slow);
+}
+
+.video-card:hover .thumb-image {
+  transform: scale(1.04);
 }
 
 .preview-video {
   z-index: 2;
   opacity: 0;
-  transition: opacity 180ms ease;
+  transition: opacity var(--transition-fast);
 }
 
 .preview-video.is-visible {
   opacity: 1;
 }
 
-.duration {
+/* 底部渐变遮罩，让 duration 与 source 徽标更易读 */
+.thumb-frame::after {
+  content: "";
   position: absolute;
-  right: 4px;
-  bottom: 4px;
-  z-index: 3;
-  padding: 2px 5px;
-  border-radius: 2px;
-  background: rgba(0, 0, 0, 0.72);
-  color: #fff;
-  font-size: 11px;
-  line-height: 1.2;
+  inset: auto 0 0 0;
+  height: 50%;
+  z-index: 2;
+  background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.45) 100%);
+  pointer-events: none;
+  opacity: 0.85;
+  transition: opacity var(--transition-fast);
 }
 
+.video-card:hover .thumb-frame::after {
+  opacity: 1;
+}
+
+/* ----- Duration ----- */
+.duration {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 3;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.02em;
+  backdrop-filter: blur(6px);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ----- Badge row（左上） ----- */
 .badge-row {
   position: absolute;
-  top: 4px;
-  left: 4px;
+  top: 8px;
+  left: 8px;
   z-index: 3;
   display: flex;
   gap: 4px;
 }
 
 .video-badge {
-  padding: 2px 5px;
-  border-radius: 2px;
-  background: var(--color-accent);
-  color: #000;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.2;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: var(--font-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.04em;
   text-transform: uppercase;
+  backdrop-filter: blur(6px);
 }
 
 .video-badge.is-hd {
-  background: #1fbf6a;
-  color: #fff;
+  background: var(--accent);
+  color: var(--text-on-accent);
 }
 
+/* ----- 来源网盘徽标（右上） ----- */
+.source-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: var(--font-xs);
+  font-weight: var(--weight-medium);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.source-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--source-color, var(--accent));
+  box-shadow: 0 0 6px var(--source-color, var(--accent));
+}
+
+.source-badge[data-kind="quark"] { --source-color: var(--drive-quark); }
+.source-badge[data-kind="p115"] { --source-color: var(--drive-p115); }
+.source-badge[data-kind="pikpak"] { --source-color: var(--drive-pikpak); }
+.source-badge[data-kind="wopan"] { --source-color: var(--drive-wopan); }
+.source-badge[data-kind="onedrive"] { --source-color: var(--drive-onedrive); }
+
+/* ----- Preview overlay ----- */
 .preview-loader {
   position: absolute;
   left: 0;
@@ -167,20 +243,16 @@
   z-index: 4;
   height: 3px;
   width: 0;
-  background: var(--color-accent);
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
   animation: preview-progress 1.8s ease forwards;
 }
 
 @keyframes preview-progress {
-  from {
-    width: 0;
-  }
-  to {
-    width: 100%;
-  }
+  from { width: 0; }
+  to { width: 100%; }
 }
 
-/* 预览播放中的真实进度条（随 currentTime 同步） */
 .preview-progress {
   position: absolute;
   left: 0;
@@ -188,31 +260,31 @@
   bottom: 0;
   z-index: 4;
   height: 3px;
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.1);
   pointer-events: none;
 }
 
 .preview-progress__bar {
   height: 100%;
-  background: var(--color-accent);
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
   transition: width 120ms linear;
 }
 
-/* 右上角的 "预览" 角标 */
 .preview-tag {
   position: absolute;
-  top: 4px;
-  right: 4px;
-  z-index: 3;
-  padding: 2px 6px;
-  border-radius: 2px;
-  background: rgba(0, 0, 0, 0.72);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
+  top: 8px;
+  right: 8px;
+  z-index: 4;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  opacity: 0.85;
+  box-shadow: 0 4px 12px var(--accent-glow);
 }
 
 .preview-error {
@@ -221,136 +293,241 @@
   z-index: 3;
   display: grid;
   place-items: center;
-  background: rgba(0, 0, 0, 0.5);
-  color: var(--color-text-invert);
-  font-size: 11px;
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--text-strong);
+  font-size: var(--font-xs);
+  backdrop-filter: blur(2px);
 }
 
+/* =========================================================
+ * Card text
+ * ========================================================= */
 .video-title {
   display: block;
-  margin-top: 6px;
-  font-size: 13px;
-  line-height: 1.3;
+  margin-top: 10px;
+  padding: 0 4px;
+  font-size: var(--font-md);
+  line-height: 1.4;
+  font-weight: var(--weight-semibold);
+  color: var(--text-strong);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--color-text-invert);
-  font-weight: 600;
+  transition: color var(--transition-fast);
+}
+
+.video-card:hover .video-title {
+  color: var(--accent);
 }
 
 .video-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 8px;
+  gap: 2px var(--space-2);
   margin-top: 4px;
-  font-size: 11px;
-  color: var(--color-muted);
+  padding: 0 4px;
+  font-size: var(--font-xs);
+  color: var(--text-faint);
 }
 
 .video-meta__author {
-  color: var(--color-muted-light);
+  color: var(--text-muted);
+  font-weight: var(--weight-medium);
 }
 
+.video-meta__author::after {
+  content: "·";
+  color: var(--text-disabled);
+  margin: 0 6px;
+}
+
+.video-meta > span:last-child::after {
+  content: "";
+  margin: 0;
+}
+
+/* 卡片底部源信息（compact 视图用） */
+.video-card__source {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  padding: 0 4px;
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+}
+
+.video-card__source-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--source-color, var(--accent));
+}
+
+.video-card__source[data-kind="quark"] { --source-color: var(--drive-quark); }
+.video-card__source[data-kind="p115"] { --source-color: var(--drive-p115); }
+.video-card__source[data-kind="pikpak"] { --source-color: var(--drive-pikpak); }
+.video-card__source[data-kind="wopan"] { --source-color: var(--drive-wopan); }
+.video-card__source[data-kind="onedrive"] { --source-color: var(--drive-onedrive); }
+
+/* =========================================================
+ * Empty / Loading / Skeleton
+ * ========================================================= */
 .video-grid-empty {
-  padding: var(--space-8) 0;
+  padding: var(--space-9) var(--space-5);
   text-align: center;
-  color: var(--color-muted);
-  background: #111111;
-  border: 1px solid #303030;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-md);
+  font-size: var(--font-md);
 }
 
 .video-grid-loading {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 0;
+  gap: var(--space-4);
 }
 
 .skeleton-card {
+  position: relative;
   aspect-ratio: 16 / 9;
   background: linear-gradient(
     90deg,
-    #1a1a1a 0%,
-    #2a2a2a 50%,
-    #1a1a1a 100%
+    rgba(255, 255, 255, 0.03) 0%,
+    rgba(255, 255, 255, 0.07) 50%,
+    rgba(255, 255, 255, 0.03) 100%
   );
   background-size: 200% 100%;
-  animation: skeleton-shimmer 1.2s ease-in-out infinite;
-  border: 1px solid #303030;
-  border-radius: 2px;
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
 }
 
 @keyframes skeleton-shimmer {
-  from {
-    background-position: 200% 0;
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+@media (max-width: 1024px) {
+  .video-grid-loading {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-  to {
-    background-position: -200% 0;
-  }
-}
-
-.pagination {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 5px;
-  margin-top: var(--space-4);
-  flex-wrap: wrap;
-}
-
-.pagination__btn {
-  min-width: 32px;
-  height: 32px;
-  padding: 0 9px;
-  border: 1px solid #3a3a3a;
-  border-radius: 2px;
-  background: #151515;
-  font-size: 12px;
-  color: var(--color-muted-light);
-}
-
-.pagination__btn:hover:not(:disabled) {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-
-.pagination__btn.is-active {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: var(--color-text-invert);
-}
-
-.pagination__btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 @media (max-width: 640px) {
   .video-grid-loading {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
+}
 
-  .video-grid {
-    gap: 9px;
-  }
+/* =========================================================
+ * Pagination
+ * ========================================================= */
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--space-6);
+  flex-wrap: wrap;
+}
 
+.pagination__btn {
+  min-width: 36px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text-default);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pagination__btn:hover:not(:disabled) {
+  border-color: var(--border-accent);
+  color: var(--accent);
+  background: var(--accent-softer);
+}
+
+.pagination__btn.is-active {
+  background: var(--accent-gradient);
+  border-color: transparent;
+  color: var(--text-on-accent);
+  box-shadow: 0 4px 12px var(--accent-glow);
+}
+
+.pagination__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* =========================================================
+ * Mobile responsive
+ * ========================================================= */
+@media (max-width: 640px) {
   .video-card {
-    padding: 3px;
+    padding: 6px;
+  }
+
+  .video-card:hover {
+    transform: none;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .video-card:active {
+    transform: scale(0.98);
+    background: var(--bg-elevated);
+  }
+
+  .video-card:hover .thumb-image {
+    transform: none;
   }
 
   .video-title {
-    font-size: 12px;
+    font-size: var(--font-sm);
+    margin-top: 8px;
   }
 
+  .video-meta {
+    font-size: 10px;
+  }
+
+  /* 移动端隐藏发布时间，保持卡片更紧凑 */
   .video-meta span:nth-child(n + 3) {
     display: none;
   }
 
-  .video-grid.is-compact .video-card {
-    padding: 5px;
+  .pagination {
+    gap: 4px;
+    margin-top: var(--space-4);
+  }
+
+  .pagination__btn {
+    min-width: 32px;
+    height: 32px;
+    font-size: var(--font-xs);
+    padding: 0 10px;
   }
 
   .video-grid.is-compact .video-card__link {
-    grid-template-columns: 120px minmax(0, 1fr);
+    grid-template-columns: 130px minmax(0, 1fr);
+    gap: 4px var(--space-2);
+  }
+
+  .video-grid.is-compact .video-title {
+    font-size: var(--font-sm);
+  }
+
+  .source-badge,
+  .preview-tag {
+    font-size: 10px;
+    height: 20px;
+    padding: 0 6px;
   }
 }

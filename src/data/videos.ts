@@ -46,6 +46,13 @@ export function hideVideo(id: string): Promise<{ ok: boolean }> {
   );
 }
 
+export function recordView(id: string): Promise<{ views: number }> {
+  return apiJSON<{ views: number }>(
+    `/api/video/${encodeURIComponent(id)}/view`,
+    { method: "POST" }
+  );
+}
+
 export type UploadVideoInput = {
   file: File;
   title: string;

@@ -16,14 +16,7 @@ export function LoginPage() {
 
   if (status === "loading") {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          display: "grid",
-          placeItems: "center",
-          color: "#888",
-        }}
-      >
+      <div className="admin-loading-screen">
         检查登录状态...
       </div>
     );

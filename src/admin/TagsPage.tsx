@@ -116,7 +116,7 @@ export function TagsPage() {
                       ))}
                     </div>
                   ) : (
-                    <span style={{ color: "#aaa" }}>—</span>
+                    <span className="admin-text-faint">—</span>
                   )}
                 </td>
               </tr>

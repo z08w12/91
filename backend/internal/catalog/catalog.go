@@ -184,6 +184,32 @@ func (c *Catalog) IncrementLike(ctx context.Context, id string) (int, error) {
 	return likes, nil
 }
 
+// IncrementView 原子 +1，返回最新观看数。视频不存在时返回 sql.ErrNoRows。
+func (c *Catalog) IncrementView(ctx context.Context, id string) (int, error) {
+	tx, err := c.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx,
+		`UPDATE videos SET views = views + 1, updated_at = ? WHERE id = ?`,
+		time.Now().UnixMilli(), id)
+	if err != nil {
+		return 0, err
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+		return 0, sql.ErrNoRows
+	}
+	var views int
+	if err := tx.QueryRowContext(ctx, `SELECT views FROM videos WHERE id = ?`, id).Scan(&views); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return views, nil
+}
+
 // VideoMetaPatch 轻量更新视频元数据（仅非零值字段会被写入）
 type VideoMetaPatch struct {
 	ThumbnailURL    string

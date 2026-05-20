@@ -252,6 +252,16 @@ export function VideoCard({ video }: Props) {
             ))}
           </div>
 
+          {video.sourceLabel && previewState !== "playing" && (
+            <span
+              className="source-badge"
+              data-kind={sourceKindFromLabel(video.sourceLabel)}
+              title={`来源：${video.sourceLabel}`}
+            >
+              {video.sourceLabel}
+            </span>
+          )}
+
           <span className="duration">{video.duration}</span>
         </div>
 
@@ -262,8 +272,6 @@ export function VideoCard({ video }: Props) {
         <div className="video-meta">
           <span className="video-meta__author">{video.author}</span>
           <span>{formatCount(video.views)} 观看</span>
-          <span>{formatCount(video.favorites)} 收藏</span>
-          <span>{formatCount(video.comments)} 评论</span>
           <span>{video.publishedAt}</span>
         </div>
       </Link>
@@ -274,4 +282,17 @@ export function VideoCard({ video }: Props) {
 function withRetryParam(src: string, retry: number): string {
   const sep = src.includes("?") ? "&" : "?";
   return `${src}${sep}r=${retry}`;
+}
+
+// 从后端返回的 sourceLabel 推断网盘类型（用于颜色标识）。
+// 后端目前会下发中文名（"夸克网盘" / "115 网盘" / "PikPak" / "联通沃盘" / "OneDrive"）
+// 或英文 kind。两边都尝试匹配；都没匹配上时返回空字符串，CSS 会回落到默认色。
+function sourceKindFromLabel(label: string): string {
+  const value = label.toLowerCase();
+  if (value.includes("夸克") || value.includes("quark")) return "quark";
+  if (value.includes("115") || value.includes("p115")) return "p115";
+  if (value.includes("pikpak")) return "pikpak";
+  if (value.includes("沃盘") || value.includes("wopan") || value.includes("联通")) return "wopan";
+  if (value.includes("onedrive") || value.includes("one drive")) return "onedrive";
+  return "";
 }

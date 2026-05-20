@@ -1,23 +1,16 @@
 import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import {
-  Crown,
   Film,
   Menu,
   Play,
-  Trophy,
   Upload,
-  Users,
   X,
 } from "lucide-react";
 
 const navItems = [
   { to: "/upload", label: "上传", icon: Upload },
   { to: "/list", label: "视频", icon: Film },
-  { to: "/channels", label: "频道", icon: Users },
-  { to: "/rank", label: "排行榜", icon: Trophy },
-  { to: "/membership", label: "会员", icon: Crown },
-  { to: "/creators", label: "创作者", icon: Play },
 ];
 
 export function MainNav() {

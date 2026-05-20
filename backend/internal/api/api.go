@@ -2,7 +2,7 @@ package api
 
 import (
 	"context"
-	"crypto/rand"
+	crand "crypto/rand"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"os/exec"
@@ -52,7 +53,6 @@ type Server struct {
 	LocalDir        string
 	UploadDir       string
 	FFmpegPath      string
-	Now             func() time.Time
 	OnVideoUploaded func(*catalog.Video)
 
 	transcodeMu   sync.Mutex
@@ -60,8 +60,7 @@ type Server struct {
 }
 
 const (
-	homePageSize       = 10
-	homeWindowDuration = 2 * time.Hour
+	homePageSize = 12
 )
 
 // VideoDTO 是返回给前端的视频对象，字段名跟前端 VideoItem 对齐
@@ -124,6 +123,7 @@ func (s *Server) RegisterRoutes(r chi.Router, a *auth.Authenticator) {
 		r.Get("/api/video/{id}", s.handleVideoDetail)
 		r.Put("/api/video/{id}/tags", s.handleUpdateVideoTags)
 		r.Post("/api/video/{id}/like", s.handleLike)
+		r.Post("/api/video/{id}/view", s.handleView)
 		r.Post("/api/video/{id}/hide", s.handleHideVideo)
 		r.Post("/api/upload", s.handleUploadVideo)
 		r.Get("/api/tags", s.handleTags)
@@ -140,43 +140,24 @@ func (s *Server) RegisterRoutes(r chi.Router, a *auth.Authenticator) {
 }
 
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
-	items, total, err := s.Catalog.ListVideos(r.Context(), catalog.ListParams{
-		Sort: "hot", Page: 1, PageSize: homePageSize,
+	// 拉一批候选（按发布时间倒序，覆盖最近 200 个），然后随机洗牌取前 homePageSize 个。
+	// 如果库内不足 200 个会自动按实际数量返回，最后裁剪到 homePageSize。
+	const candidatePool = 200
+	items, _, err := s.Catalog.ListVideos(r.Context(), catalog.ListParams{
+		Sort: "latest", Page: 1, PageSize: candidatePool,
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	page := homeWindowPage(s.now(), total, homePageSize)
-	if page > 1 {
-		items, _, err = s.Catalog.ListVideos(r.Context(), catalog.ListParams{
-			Sort: "hot", Page: page, PageSize: homePageSize,
-		})
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
-			return
-		}
+	rand.Shuffle(len(items), func(i, j int) {
+		items[i], items[j] = items[j], items[i]
+	})
+	if len(items) > homePageSize {
+		items = items[:homePageSize]
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, mapVideos(items))
-}
-
-func (s *Server) now() time.Time {
-	if s.Now != nil {
-		return s.Now()
-	}
-	return time.Now()
-}
-
-func homeWindowPage(now time.Time, total, pageSize int) int {
-	if pageSize <= 0 || total <= pageSize {
-		return 1
-	}
-	pageCount := (total + pageSize - 1) / pageSize
-	if pageCount <= 1 {
-		return 1
-	}
-	window := now.Unix() / int64(homeWindowDuration/time.Second)
-	return int(window%int64(pageCount)) + 1
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
@@ -218,9 +199,7 @@ func (s *Server) handleVideoDetail(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, sql.ErrNoRows)
 		return
 	}
-	related, _, _ := s.Catalog.ListVideos(r.Context(), catalog.ListParams{
-		Sort: "hot", Page: 1, PageSize: 8,
-	})
+	related := s.pickRelatedVideos(r.Context(), v, 6)
 	dto := mapVideo(v)
 	if d, err := s.Catalog.GetDrive(r.Context(), v.DriveID); err == nil {
 		dto.SourceLabel = driveKindLabel(d.Kind)
@@ -238,10 +217,90 @@ func (s *Server) handleVideoDetail(w http.ResponseWriter, r *http.Request) {
 			Href:   "/author/" + v.Author,
 			Badges: []string{},
 		},
-		RelatedVideos: filterVideos(mapVideos(related), v.ID),
+		RelatedVideos: mapVideos(related),
 		CommentsList:  []Comment{},
 	}
+	// 推荐每次随机生成，禁止浏览器和中间层缓存详情响应
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, detail)
+}
+
+// pickRelatedVideos 选 total 个推荐视频。
+// 一半（向上取整）来自同标签命中，剩下用全库随机补齐；不会重复，也不会包含当前视频。
+func (s *Server) pickRelatedVideos(ctx context.Context, current *catalog.Video, total int) []*catalog.Video {
+	if total <= 0 || current == nil {
+		return nil
+	}
+	tagQuota := total / 2
+	if tagQuota <= 0 && len(current.Tags) > 0 {
+		tagQuota = 1
+	}
+
+	picked := make([]*catalog.Video, 0, total)
+	seen := map[string]struct{}{current.ID: {}}
+
+	// 1) 同标签候选：对每个 tag 取一批，合并去重，洗牌后取 tagQuota 个
+	if tagQuota > 0 && len(current.Tags) > 0 {
+		var tagPool []*catalog.Video
+		for _, tag := range current.Tags {
+			if tag == "" {
+				continue
+			}
+			items, _, err := s.Catalog.ListVideos(ctx, catalog.ListParams{
+				Tag: tag, Sort: "latest", Page: 1, PageSize: 30,
+			})
+			if err != nil {
+				continue
+			}
+			for _, v := range items {
+				if v == nil {
+					continue
+				}
+				if _, ok := seen[v.ID]; ok {
+					continue
+				}
+				seen[v.ID] = struct{}{}
+				tagPool = append(tagPool, v)
+			}
+		}
+		rand.Shuffle(len(tagPool), func(i, j int) {
+			tagPool[i], tagPool[j] = tagPool[j], tagPool[i]
+		})
+		if len(tagPool) > tagQuota {
+			tagPool = tagPool[:tagQuota]
+		}
+		picked = append(picked, tagPool...)
+	}
+
+	// 2) 随机补齐：从全库取一批（避开已选 ID），洗牌后取剩下的名额
+	remaining := total - len(picked)
+	if remaining > 0 {
+		items, _, err := s.Catalog.ListVideos(ctx, catalog.ListParams{
+			Sort: "latest", Page: 1, PageSize: 200,
+		})
+		if err == nil {
+			var randomPool []*catalog.Video
+			for _, v := range items {
+				if v == nil {
+					continue
+				}
+				if _, ok := seen[v.ID]; ok {
+					continue
+				}
+				seen[v.ID] = struct{}{}
+				randomPool = append(randomPool, v)
+			}
+			rand.Shuffle(len(randomPool), func(i, j int) {
+				randomPool[i], randomPool[j] = randomPool[j], randomPool[i]
+			})
+			if len(randomPool) > remaining {
+				randomPool = randomPool[:remaining]
+			}
+			picked = append(picked, randomPool...)
+		}
+	}
+
+	return picked
 }
 
 func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
@@ -297,6 +356,20 @@ func (s *Server) handleLike(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"likes": likes})
+}
+
+func (s *Server) handleView(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	views, err := s.Catalog.IncrementView(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeErr(w, http.StatusNotFound, err)
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"views": views})
 }
 
 func (s *Server) handleHideVideo(w http.ResponseWriter, r *http.Request) {
@@ -841,7 +914,7 @@ func splitUploadTags(value string) []string {
 
 func newUploadID(now time.Time) (string, error) {
 	var suffix [6]byte
-	if _, err := rand.Read(suffix[:]); err != nil {
+	if _, err := crand.Read(suffix[:]); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("upload-%d-%s", now.UnixNano(), hex.EncodeToString(suffix[:])), nil
@@ -851,16 +924,6 @@ func mapVideos(vs []*catalog.Video) []VideoDTO {
 	out := make([]VideoDTO, 0, len(vs))
 	for _, v := range vs {
 		out = append(out, mapVideo(v))
-	}
-	return out
-}
-
-func filterVideos(vs []VideoDTO, exclude string) []VideoDTO {
-	out := make([]VideoDTO, 0, len(vs))
-	for _, v := range vs {
-		if v.ID != exclude {
-			out = append(out, v)
-		}
 	}
 	return out
 }

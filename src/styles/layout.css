@@ -1,10 +1,13 @@
+/* =========================================================
+ * Layout
+ * AppShell / Container / Hero / Section / Footer / Upload / BackToTop / PromoStrip
+ * ========================================================= */
 .app-shell {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background: var(--color-page);
-  color: var(--color-muted-light);
-  font-size: 13px;
+  color: var(--text-default);
+  font-size: var(--font-base);
 }
 
 .app-shell__main {
@@ -15,109 +18,149 @@
 .container {
   max-width: var(--container-max);
   margin: 0 auto;
-  padding: 0 15px;
+  padding: 0 var(--container-pad-x);
 }
 
 .page-section {
-  padding: var(--space-4) 0;
+  padding: var(--space-6) 0;
 }
 
 .page-section + .page-section {
   padding-top: 0;
 }
 
+/* =========================================================
+ * Section header
+ * ========================================================= */
 .section-header {
   display: flex;
   align-items: center;
-  height: 40px;
-  padding: 0 14px;
-  background: var(--color-accent);
-  color: var(--color-text-invert);
-  font-size: 15px;
-  font-weight: 600;
-  border: 1px solid var(--color-accent-dark);
-  border-radius: 2px 2px 0 0;
+  gap: var(--space-3);
+  padding: 0 0 var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.section-header::before {
+  content: "";
+  width: 4px;
+  height: 22px;
+  border-radius: 2px;
+  background: var(--accent-gradient);
+  box-shadow: 0 0 12px var(--accent-glow);
+  flex: 0 0 auto;
 }
 
 .section-header__title {
   flex: 1;
+  font-size: var(--font-xl);
+  font-weight: var(--weight-bold);
+  color: var(--text-strong);
+  letter-spacing: -0.005em;
 }
 
 .section-header__extra {
-  font-size: 12px;
-  opacity: 0.9;
+  font-size: var(--font-sm);
+  color: var(--text-faint);
+  font-weight: var(--weight-regular);
 }
 
+/* =========================================================
+ * Promo strip
+ * ========================================================= */
 .promo-strip {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  margin-top: var(--space-3);
+  gap: var(--space-3);
+  margin-top: var(--space-4);
 }
 
 .promo-card {
-  height: 82px;
-  padding: 10px;
-  border-radius: 2px;
-  background: #111111;
-  color: var(--color-text-invert);
+  height: 96px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-default);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  border: 1px solid var(--color-card-border);
+  border: 1px solid var(--border-subtle);
+  transition: transform var(--transition-fast), border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.promo-card:hover {
+  border-color: var(--border-accent);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+  color: var(--text-strong);
 }
 
 .promo-card__label {
-  font-size: 11px;
+  font-size: var(--font-xs);
   text-transform: uppercase;
-  color: var(--color-accent);
-  letter-spacing: 0;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+  font-weight: var(--weight-semibold);
 }
 
 .promo-card__title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-md);
+  font-weight: var(--weight-semibold);
+  color: var(--text-strong);
 }
 
 .promo-card__meta {
-  font-size: 12px;
-  color: var(--color-muted-light);
+  font-size: var(--font-sm);
+  color: var(--text-muted);
 }
 
+@media (max-width: 1024px) {
+  .promo-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* =========================================================
+ * Back to top
+ * ========================================================= */
 .back-to-top {
   position: fixed;
-  right: 20px;
-  bottom: 20px;
-  width: 42px;
-  height: 42px;
+  right: 24px;
+  bottom: 24px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
-  background: var(--color-accent);
-  color: var(--color-text-invert);
+  background: var(--accent-gradient);
+  color: var(--text-on-accent);
   display: grid;
   place-items: center;
-  box-shadow: var(--shadow-elevated);
+  box-shadow: 0 6px 24px var(--accent-glow), var(--shadow-inset);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 180ms ease, transform 180ms ease;
-  z-index: 100;
+  transform: translateY(8px);
+  transition: opacity var(--transition-normal), transform var(--transition-normal);
+  z-index: var(--z-overlay);
 }
 
 .back-to-top.is-visible {
   opacity: 1;
   pointer-events: auto;
+  transform: translateY(0);
 }
 
 .back-to-top:hover {
-  transform: translateY(-2px);
-  color: var(--color-text-invert);
+  transform: translateY(-3px);
+  filter: brightness(1.05);
 }
 
+/* =========================================================
+ * Footer
+ * ========================================================= */
 .footer {
-  margin-top: var(--space-6);
-  padding: var(--space-5) 0;
-  background: var(--color-nav);
-  color: var(--color-muted-light);
-  border-top: 1px solid #252525;
+  margin-top: var(--space-9);
+  padding: var(--space-6) 0;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .footer__inner {
@@ -128,44 +171,61 @@
   align-items: center;
 }
 
+.footer__copy {
+  font-size: var(--font-sm);
+  color: var(--text-faint);
+}
+
 .footer__links {
   display: flex;
-  gap: var(--space-4);
+  gap: var(--space-5);
   flex-wrap: wrap;
 }
 
-.footer__copy {
-  font-size: 12px;
-  color: var(--color-muted);
+.footer__links a {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
 }
 
+.footer__links a:hover {
+  color: var(--accent);
+}
+
+/* =========================================================
+ * Upload page
+ * ========================================================= */
 .upload-panel {
   display: grid;
   gap: var(--space-4);
-  padding: 16px;
-  background: #111111;
-  border: 1px solid var(--color-card-border);
-  border-top: 0;
-  color: var(--color-muted-light);
+  padding: var(--space-5);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  margin-top: var(--space-4);
 }
 
 .upload-drop {
   position: relative;
   display: grid;
   place-items: center;
-  gap: 8px;
-  min-height: 164px;
-  padding: 18px;
-  border: 1px dashed #4a4a4a;
-  border-radius: 3px;
-  background: #171717;
-  color: var(--color-muted-light);
+  gap: 10px;
+  min-height: 200px;
+  padding: var(--space-6);
+  border: 2px dashed var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  color: var(--text-muted);
   text-align: center;
   cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .upload-drop:hover {
-  border-color: var(--color-accent);
+  border-color: var(--border-accent);
+  background: var(--accent-softer);
+  color: var(--text-default);
 }
 
 .upload-drop input {
@@ -179,17 +239,18 @@
 .upload-drop__icon {
   display: grid;
   place-items: center;
-  width: 48px;
-  height: 48px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
-  background: #232323;
-  color: var(--color-accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .upload-drop__title {
   max-width: 100%;
-  color: var(--color-text-invert);
-  font-size: 14px;
+  color: var(--text-strong);
+  font-size: var(--font-md);
+  font-weight: var(--weight-medium);
   overflow-wrap: anywhere;
 }
 
@@ -199,22 +260,30 @@
 }
 
 .upload-field > span {
-  color: var(--color-muted);
-  font-size: 12px;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
 }
 
 .upload-field input {
   width: 100%;
-  min-height: 38px;
-  padding: 8px 10px;
-  border: 1px solid #363636;
-  border-radius: 2px;
-  background: #181818;
-  color: var(--color-text-invert);
+  height: 40px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text-strong);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.upload-field input:focus {
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
 }
 
 .upload-field input::placeholder {
-  color: #777777;
+  color: var(--text-faint);
 }
 
 .upload-tags {
@@ -228,53 +297,57 @@
   align-items: center;
   justify-content: center;
   gap: 5px;
-  min-width: 58px;
-  min-height: 32px;
-  padding: 6px 10px;
-  border: 1px solid #383838;
-  border-radius: 2px;
-  background: #1b1b1b;
-  color: var(--color-muted-light);
-  font-size: 12px;
+  min-height: 34px;
+  padding: 6px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--bg-sunken);
+  color: var(--text-default);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
+  transition: border-color var(--transition-fast), background var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .upload-tag:hover {
-  border-color: var(--color-accent);
-  color: var(--color-text-invert);
+  border-color: var(--border-accent);
+  color: var(--accent);
 }
 
 .upload-tag.is-active {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: var(--color-text-invert);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
 }
 
 .upload-message {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 32px;
-  padding: 7px 10px;
-  border-radius: 2px;
-  font-size: 12px;
+  min-height: 36px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-sm);
+  border: 1px solid transparent;
 }
 
 .upload-message.is-error {
-  background: #2b1515;
-  color: #ffb3b3;
-  border: 1px solid #5a2424;
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: rgba(241, 85, 108, 0.3);
 }
 
 .upload-message.is-success {
-  background: #132414;
-  color: #b9f0bd;
-  border: 1px solid #2f6733;
+  background: var(--success-soft);
+  color: var(--success);
+  border-color: rgba(63, 207, 142, 0.3);
 }
 
 .upload-message a {
   color: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
+  font-weight: var(--weight-semibold);
 }
 
 .upload-actions {
@@ -287,36 +360,84 @@
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-width: 108px;
-  min-height: 38px;
-  padding: 8px 14px;
-  border-radius: 2px;
-  background: var(--color-accent);
-  color: var(--color-text-invert);
-  font-weight: 600;
+  min-width: 140px;
+  height: 42px;
+  padding: 0 var(--space-5);
+  border-radius: var(--radius-sm);
+  background: var(--accent-gradient);
+  color: var(--text-on-accent);
+  font-weight: var(--weight-semibold);
+  font-size: var(--font-md);
+  box-shadow: 0 6px 16px var(--accent-glow), var(--shadow-inset);
+}
+
+.upload-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+  box-shadow: 0 10px 22px var(--accent-glow), var(--shadow-inset);
 }
 
 .upload-submit:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+  filter: grayscale(0.3);
+  box-shadow: none;
 }
 
-@media (max-width: 1024px) {
-  .promo-strip {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
+/* =========================================================
+ * Responsive
+ * ========================================================= */
 @media (max-width: 640px) {
   .container {
-    padding: 0 15px;
+    padding: 0 14px;
   }
 
   .page-section {
-    padding: var(--space-3) 0;
+    padding: var(--space-4) 0;
   }
 
   .promo-strip {
     grid-template-columns: 1fr;
+  }
+
+  .section-header {
+    margin-top: var(--space-4);
+    padding-bottom: var(--space-2);
+  }
+
+  .section-header__title {
+    font-size: var(--font-lg);
+  }
+
+  .footer {
+    margin-top: var(--space-6);
+    padding: var(--space-5) 0;
+  }
+
+  .footer__inner {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: var(--space-3);
+  }
+
+  .upload-panel {
+    padding: var(--space-4);
+  }
+
+  .upload-drop {
+    min-height: 160px;
+    padding: var(--space-4);
+  }
+
+  .upload-submit {
+    width: 100%;
+  }
+
+  .back-to-top {
+    right: 14px;
+    bottom: 14px;
+    width: 40px;
+    height: 40px;
   }
 }

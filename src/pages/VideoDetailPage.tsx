@@ -1,16 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
-import { SearchPanel } from "@/components/SearchPanel";
 import { VideoPlayer } from "@/components/VideoPlayer";
 import { VideoActions } from "@/components/VideoActions";
 import { VideoInfoPanel } from "@/components/VideoInfoPanel";
-import { CommentPanel } from "@/components/CommentPanel";
 import { RecommendedRail } from "@/components/RecommendedRail";
 import {
   fetchTags,
   fetchVideoDetail,
   hideVideo,
+  recordView,
   updateVideoTags,
 } from "@/data/videos";
 import type { TagItem, VideoDetail } from "@/types";
@@ -24,7 +23,6 @@ export default function VideoDetailPage() {
   const [tagSaving, setTagSaving] = useState(false);
   const [hideSaving, setHideSaving] = useState(false);
   const detailTopRef = useRef<HTMLDivElement | null>(null);
-  const commentRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -53,10 +51,6 @@ export default function VideoDetailPage() {
     });
   }, [loading, detail?.id]);
 
-  function jumpToComments() {
-    commentRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-
   async function handleTagsChange(nextTags: string[]) {
     if (!detail) return;
     setTagSaving(true);
@@ -79,6 +73,13 @@ export default function VideoDetailPage() {
       setHideSaving(false);
       window.alert("隐藏失败，请稍后重试");
     }
+  }
+
+  function handleFirstPlay() {
+    if (!detail) return;
+    const id = detail.id;
+    // 失败静默忽略，不打扰用户播放体验
+    recordView(id).catch(() => undefined);
   }
 
   if (loading) {
@@ -109,33 +110,27 @@ export default function VideoDetailPage() {
   return (
     <AppShell>
       <div className="container page-section">
-        <SearchPanel />
-      </div>
-
-      <div className="container">
         <div className="detail-layout">
           <div className="detail-main" ref={detailTopRef}>
-            <div className="detail-title-bar">{detail.title}</div>
-            <VideoPlayer
-              src={detail.videoSrc}
-              poster={detail.poster}
-              title={detail.title}
-            />
-            <VideoActions
-              video={detail}
-              onJumpToComments={jumpToComments}
-              onHideVideo={handleHideVideo}
-              hideSaving={hideSaving}
-            />
+            <div className="detail-player-card">
+              <div className="detail-title-bar">{detail.title}</div>
+              <VideoPlayer
+                src={detail.videoSrc}
+                poster={detail.poster}
+                title={detail.title}
+                onFirstPlay={handleFirstPlay}
+              />
+              <VideoActions
+                video={detail}
+                onHideVideo={handleHideVideo}
+                hideSaving={hideSaving}
+              />
+            </div>
             <VideoInfoPanel
               video={detail}
               availableTags={tags}
               tagSaving={tagSaving}
               onTagsChange={handleTagsChange}
-            />
-            <CommentPanel
-              ref={commentRef}
-              comments={detail.commentsList}
             />
           </div>
           <RecommendedRail videos={detail.relatedVideos} />

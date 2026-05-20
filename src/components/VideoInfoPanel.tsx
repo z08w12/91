@@ -14,7 +14,6 @@ export function VideoInfoPanel({
   tagSaving = false,
   onTagsChange,
 }: Props) {
-  const [collapsed, setCollapsed] = useState(true);
   const [editingTags, setEditingTags] = useState(false);
   const [draftTags, setDraftTags] = useState<string[]>(video.tags ?? []);
   const [tagError, setTagError] = useState("");
@@ -100,24 +99,6 @@ export function VideoInfoPanel({
             )}
           </div>
         </div>
-
-        <div className="info-row">
-          <span className="info-row__label">描述</span>
-          <span className="info-row__value">
-            <p
-              className={`description ${collapsed ? "is-collapsed" : ""}`}
-            >
-              {video.description}
-            </p>
-            <button
-              className="description-toggle"
-              onClick={() => setCollapsed((v) => !v)}
-            >
-              {collapsed ? "展开全文" : "收起"}
-            </button>
-          </span>
-        </div>
-
       </div>
     </section>
   );

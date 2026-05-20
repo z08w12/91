@@ -192,16 +192,16 @@ export function DrivesPage() {
           <tbody>
             {list.map((d) => (
               <tr key={d.id}>
-                <td data-label="名称">{d.name || <span style={{ color: "#aaa" }}>（未命名）</span>}</td>
+                <td data-label="名称">{d.name || <span className="admin-text-faint">（未命名）</span>}</td>
                 <td data-label="类型">{kindLabel[d.kind] ?? d.kind}</td>
-                <td data-label="ID" style={{ fontFamily: "ui-monospace", fontSize: 12 }}>{d.id}</td>
+                <td data-label="ID" className="admin-mono-cell">{d.id}</td>
                 <td data-label="状态">
                   <StatusTag status={d.status} error={d.lastError} hasCred={d.hasCredential} />
                 </td>
                 <td data-label="生成状态">
                   <GenerationStatusCell drive={d} />
                 </td>
-                <td data-label="扫描根" style={{ fontFamily: "ui-monospace", fontSize: 12 }}>
+                <td data-label="扫描根" className="admin-mono-cell">
                   {d.scanRootId || d.rootId}
                 </td>
                 <td data-label="本地占用">
@@ -524,9 +524,9 @@ function DriveForm({
         </div>
       </div>
 
-      <hr style={{ border: 0, borderTop: "1px solid #eee", margin: "8px 0" }} />
+      <hr className="admin-form__divider" />
 
-      <div className="admin-form__help" style={{ fontSize: 13, color: "#555" }}>
+      <div className="admin-form__help admin-form__help--lead">
         {credentialHelp(form.kind, isEdit)}
       </div>
 

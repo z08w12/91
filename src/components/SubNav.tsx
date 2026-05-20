@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { subNavLinks } from "@/data/tags";
 
 export function SubNav() {
+  if (subNavLinks.length === 0) return null;
   return (
     <div className="sub-nav">
       <div className="container">
