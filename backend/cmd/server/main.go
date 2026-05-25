@@ -165,7 +165,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(corsMiddleware)
+	r.Use(corsMiddleware(cfg.Server.AllowedOrigins))
 
 	apiServer.RegisterRoutes(r, authr)
 	adminServer.Register(r)
@@ -1281,25 +1281,69 @@ func spider91IntCred(d *catalog.Drive, key string, def int) int {
 
 // ---------- middleware ----------
 
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", originOr(r, "*"))
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
-		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
+// corsMiddleware 返回一个 chi 中间件，按白名单匹配 Origin 决定是否回写
+// CORS 响应头。
+//
+// 设计要点：
+//   - 不再反射任意 Origin。Origin 必须出现在 allowedOrigins 中才会得到
+//     Access-Control-Allow-Origin / Allow-Credentials 的"放行"响应头；
+//     不在白名单的跨源请求拿不到这些头，浏览器会拒绝读响应内容。
+//   - 同源请求（浏览器不发 Origin 头，或 Origin 等于自己）不需要 CORS 头，
+//     直接放行。
+//   - 始终带 Vary: Origin，避免反代缓存把 A Origin 的允许头喂给 B Origin。
+//   - 对不在白名单的 OPTIONS 预检直接 403，避免被当成"放行"信号。
+//
+// allowedOrigins 由 config.Server.AllowedOrigins 注入；默认为空 = 完全
+// 不允许跨源（最安全的默认值，同源部署不受影响）。
+func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
+	allow := make(map[string]struct{}, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		o = strings.TrimSpace(o)
+		if o == "" || o == "*" {
+			// 通配符在带 cookie 的 CORS 下没意义且危险，直接忽略
+			continue
 		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func originOr(r *http.Request, fallback string) string {
-	if o := r.Header.Get("Origin"); o != "" {
-		return o
+		allow[o] = struct{}{}
 	}
-	return fallback
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+
+			// 任何走过 CORS 检查的响应都要带 Vary: Origin，避免缓存污染。
+			w.Header().Add("Vary", "Origin")
+
+			isAllowedOrigin := false
+			if origin != "" {
+				_, isAllowedOrigin = allow[origin]
+			}
+
+			if isAllowedOrigin {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+				w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+				w.Header().Set("Access-Control-Max-Age", "600")
+			}
+
+			if r.Method == http.MethodOptions {
+				// 预检请求：只对白名单 Origin 返回 204；否则 403 让浏览器把请求拦下来。
+				// 同源场景一般不会触发预检（浏览器只在跨源 + 复杂请求时才发 OPTIONS）。
+				if isAllowedOrigin {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				if origin != "" {
+					http.Error(w, "cors: origin not allowed", http.StatusForbidden)
+					return
+				}
+				// 没带 Origin 的 OPTIONS 不是 CORS 预检（可能是健康检查工具），
+				// 直接交给下游处理。
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func parseBoolDefault(raw string, def bool) bool {

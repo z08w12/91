@@ -20,6 +20,11 @@ type Server struct {
 	Listen        string `yaml:"listen"`
 	Admin         Admin  `yaml:"admin"`
 	SessionSecret string `yaml:"session_secret"`
+	// AllowedOrigins 是允许跨源访问的前端 Origin 白名单（如 "https://video.example.com"）。
+	// 默认空 → 不开启 CORS 跨源；同源部署（前后端在同一个域名 + 端口下）不需要配置此项。
+	// 浏览器对不在列表里的 Origin 不会拿到 Access-Control-Allow-Origin 头，自然就读不到响应。
+	// 不要写 "*"；带 cookie 的 CORS 必须是具体 Origin。
+	AllowedOrigins []string `yaml:"allowed_origins"`
 }
 
 type Admin struct {

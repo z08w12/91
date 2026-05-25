@@ -8,6 +8,15 @@ server:
     password: "admin123"
   # 用于签发 admin session cookie，生产请改成随机字符串
   session_secret: "change-me-to-a-random-string"
+  # CORS 白名单：允许跨源访问的前端 Origin 列表。默认空 = 不允许任何跨源请求。
+  # 同源部署（前后端在同一域名 + 端口下，由 nginx 反代）不需要配此项。
+  # 仅在前后端分别部署在不同域名/端口、且需要前端 fetch 后端时填写。
+  # 不要写 "*"；带 cookie 的 CORS 必须列具体 Origin。
+  # 示例：
+  # allowed_origins:
+  #   - "https://video.example.com"
+  #   - "http://127.0.0.1:9191"
+  allowed_origins: []
 
 storage:
   # SQLite 数据库文件路径
