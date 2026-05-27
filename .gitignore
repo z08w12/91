@@ -29,3 +29,6 @@ tsconfig.tsbuildinfo
 91porn_videos.json
 91VideoSpider/91porn_videos.json
 91VideoSpider/data/
+91VideoSpider/__pycache__/
+__pycache__/
+*.pyc

@@ -1,6 +1,7 @@
 package spider91
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -133,21 +134,15 @@ type spiderVideoEntry struct {
 	DetailURL string `json:"detail_url"`
 }
 
-type spiderOutput struct {
-	CrawlTime    string             `json:"crawl_time"`
-	PagesCrawled int                `json:"pages_crawled"`
-	TotalVideos  int                `json:"total_videos"`
-	Successful   int                `json:"successful"`
-	Failed       int                `json:"failed"`
-	Videos       []spiderVideoEntry `json:"videos"`
-}
-
 // RunOnce 执行一次"跑爬虫 → 下载 → 入库"流程：
-//   1. 从 catalog 拉取本 drive 已存在的 viewkey 列表，写到临时文件
-//   2. 启动 python，传 --target-new=targetNew --seen-viewkeys-file=<tmp>，
-//      让 Python 从 page 1 起翻页，跳过已知 viewkey，凑够 targetNew 个新视频后退出
-//   3. 解析 JSON，按顺序下载视频和封面（视频文件后缀按 URL 真实后缀决定）
-//   4. 入库 + 触发 OnNewVideo 回调（让 backend 把新视频塞进 teaser worker）
+//  1. 从 catalog 拉取本 drive 已存在的 viewkey 列表，写到临时文件
+//  2. 启动 Python 爬虫（--target-new + --seen-viewkeys-file + --stream-output），
+//     Python 每解析出一个 video 直链就把 entry 当作一行 JSON 写到 stdout。
+//  3. Go 端 bufio.Scanner 按行读：每行立即下载视频和封面、入库。
+//     这样 "Python 翻页找下一个" 与 "Go 下载当前一个" 在时间上重叠，缩短整轮耗时；
+//     更重要的是不会让前几个下载耽误后面签名链接 e= 过期。
+//  4. 全部消费完 + 子进程退出 → 返回 CrawlResult。teaser 不在此处入队，
+//     由调用方 (App.runSpider91Crawl) 在 RunOnce 后统一调 enqueueDriveGeneration。
 //
 // targetNew <= 0 会被规范化成 spider91DefaultTargetNew（15）。
 func (c *Crawler) RunOnce(ctx context.Context, targetNew int) (*CrawlResult, error) {
@@ -202,45 +197,65 @@ func (c *Crawler) RunOnce(ctx context.Context, targetNew int) (*CrawlResult, err
 	}
 	result.SeenSnapshot = seenCount
 
-	// 2. 跑 Python 爬虫（target_new 模式）
-	if err := c.runSpiderTargetNew(ctx, targetNew, seenPath, outputPath); err != nil {
-		return result, fmt.Errorf("spider91 crawler: spider run: %w", err)
-	}
-
-	// 3. 解析 JSON
-	spec, err := readSpiderOutput(outputPath)
+	// 2-3. 启动 Python 爬虫（流式 stdout 协议），并边读边处理。
+	//
+	// 协议：Python 每解析出一个 video 的直链就把 entry JSON 写到 stdout 一行，
+	// 立即 flush；本端 bufio.Scanner 收到一行就立即 processOne 下载视频和封面。
+	// 这样把 "Python 等所有视频解析完 + Go 顺序下载 N 个" 重叠成 "Python 翻页找下一个的同时
+	// Go 在下载当前一个"，缩短总耗时；更重要的是把每条直链 e= 过期时间窗用满 ——
+	// 不会因为 Go 在下前面 7 个时让后面 8 个的签名超时。
+	cmd, stdout, err := c.startSpiderTargetNew(ctx, targetNew, seenPath, outputPath)
 	if err != nil {
-		return result, fmt.Errorf("spider91 crawler: parse output: %w", err)
+		return result, fmt.Errorf("spider91 crawler: spider start: %w", err)
 	}
-	result.TotalEntries = len(spec.Videos)
 
-	// 4. 顺序处理每条；保留二次去重作防御性兜底
-	for _, item := range spec.Videos {
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024) // 单条 entry 远小于 4 MB；保险加大上限
+	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
-			return result, err
-		}
-		if result.NewVideos >= targetNew {
-			// Python 侧已经按 target_new 控制了输出，这里再兜底一次防止脚本表现异常
+			_ = cmd.Process.Kill()
 			break
 		}
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var item spiderVideoEntry
+		if jerr := json.Unmarshal([]byte(line), &item); jerr != nil {
+			log.Printf("[spider91] drive=%s stdout parse: %v line=%q", c.cfg.Driver.ID(), jerr, line)
+			continue
+		}
+		result.TotalEntries++
 		viewkey := strings.TrimSpace(item.Viewkey)
 		if viewkey == "" || strings.TrimSpace(item.VideoURL) == "" {
 			result.Failed++
 			continue
 		}
-
+		if result.NewVideos >= targetNew {
+			// Python 侧已用 target_new 控制；这里再兜底防止脚本异常多输出
+			break
+		}
 		videoID := buildVideoID(c.cfg.Driver.ID(), viewkey)
-		// viewkey 已经入库 → 跳过（防御性，正常 Python 端已经过滤）
 		if existing, _ := c.cfg.Catalog.GetVideo(ctx, videoID); existing != nil {
 			result.Skipped++
 			continue
 		}
-		if err := c.processOne(ctx, videoID, item); err != nil {
-			log.Printf("[spider91] drive=%s viewkey=%s failed: %v", c.cfg.Driver.ID(), viewkey, err)
+		if perr := c.processOne(ctx, videoID, item); perr != nil {
+			log.Printf("[spider91] drive=%s viewkey=%s failed: %v", c.cfg.Driver.ID(), viewkey, perr)
 			result.Failed++
 			continue
 		}
 		result.NewVideos++
+	}
+	if scerr := scanner.Err(); scerr != nil {
+		log.Printf("[spider91] drive=%s stdout scan: %v", c.cfg.Driver.ID(), scerr)
+	}
+	if werr := cmd.Wait(); werr != nil {
+		// 子进程被我们 Kill 是预期；其它错误（exit code != 0）记录日志但不当致命错误，
+		// 因为流式模式下 stdout 已读完，能拿到的视频已经处理。
+		if ctx.Err() == nil {
+			log.Printf("[spider91] drive=%s spider exit: %v", c.cfg.Driver.ID(), werr)
+		}
 	}
 	return result, nil
 }
@@ -288,11 +303,13 @@ func (c *Crawler) writeSeenViewkeys(ctx context.Context, path string) (int, erro
 	return len(seen), nil
 }
 
-// runSpiderTargetNew 用 --target-new + --seen-viewkeys-file 模式调起 python 子进程。
-func (c *Crawler) runSpiderTargetNew(ctx context.Context, targetNew int, seenPath, outputPath string) error {
-	cmdCtx, cancel := context.WithTimeout(ctx, c.cfg.SpiderTimeout)
-	defer cancel()
-
+// runSpiderTargetNew 启动 Python 子进程（--target-new + --seen-viewkeys-file
+// + --stream-output）。返回 cmd 和 stdout 的 reader；调用方按行 JSON 消费 stdout，
+// 每读到一行就立即 processOne，下完再读下一行。Python 的日志被引到 stderr，
+// 由本函数转发到 backend log，不影响 stdout 的 JSONL 协议。
+//
+// 使用方负责调 cmd.Wait()，并 close stdout reader。
+func (c *Crawler) startSpiderTargetNew(ctx context.Context, targetNew int, seenPath, outputPath string) (*exec.Cmd, io.ReadCloser, error) {
 	args := []string{
 		c.cfg.ScriptPath,
 		"--target-new", fmt.Sprintf("%d", targetNew),
@@ -300,22 +317,47 @@ func (c *Crawler) runSpiderTargetNew(ctx context.Context, targetNew int, seenPat
 		"--output", outputPath,
 		"--no-resume",
 		"--quiet",
+		"--stream-output",
 	}
-	cmd := exec.CommandContext(cmdCtx, c.cfg.PythonPath, args...)
+	// 子进程的 ctx 走外层 ctx 即可，不再额外加 SpiderTimeout —— 流式模式下
+	// 单个视频的下载在 Go 端做超时控制（DownloadTimeout）；爬虫脚本主要时间在
+	// 列表/详情页 + 网络等待，整轮上限通过外层 ctx 控制更准确。
+	cmd := exec.CommandContext(ctx, c.cfg.PythonPath, args...)
 	if c.cfg.WorkDir != "" {
 		cmd.Dir = c.cfg.WorkDir
 	}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		_ = stdout.Close()
+		return nil, nil, fmt.Errorf("stderr pipe: %w", err)
+	}
 	log.Printf("[spider91] drive=%s exec %s --target-new=%d --seen=%s --output=%s",
 		c.cfg.Driver.ID(), c.cfg.ScriptPath, targetNew, seenPath, outputPath)
-	if err := cmd.Run(); err != nil {
-		return err
+	if err := cmd.Start(); err != nil {
+		_ = stdout.Close()
+		_ = stderr.Close()
+		return nil, nil, fmt.Errorf("start: %w", err)
 	}
-	if _, err := os.Stat(outputPath); err != nil {
-		return fmt.Errorf("output file not produced: %w", err)
+	// stderr 转发到 backend log。子进程退出时 reader 自动 EOF，goroutine 自然结束。
+	go forwardSpiderLog(c.cfg.Driver.ID(), stderr)
+	return cmd, stdout, nil
+}
+
+// forwardSpiderLog 把 Python stderr 逐行转发到 backend log，便于调试。
+func forwardSpiderLog(driveID string, r io.Reader) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		log.Printf("[spider91:py] drive=%s %s", driveID, line)
 	}
-	return nil
 }
 
 // processOne 处理单个 viewkey：下载视频 + 封面 + 复制封面 + 入库。
@@ -346,7 +388,9 @@ func (c *Crawler) processOne(ctx context.Context, videoID string, item spiderVid
 		return fmt.Errorf("download video: %w", err)
 	}
 
-	// 封面下载失败不致命，记录后继续，让 thumbnail worker 兜底。
+	// 封面下载失败不致命，视频本身仍入库；下方在 UpsertVideo 后会把
+	// thumbnail_status 显式标 'failed'（spider91 drive 的 thumb worker 按设计
+	// 不处理 spider91 视频，没人能"兜底"）。
 	thumbReady := false
 	if strings.TrimSpace(item.ThumbURL) != "" {
 		if _, err := c.downloadAtomic(dlCtx, item.ThumbURL, thumbPath, item.DetailURL); err != nil {
@@ -404,12 +448,14 @@ func (c *Crawler) processOne(ctx context.Context, videoID string, item spiderVid
 		_ = os.Remove(thumbPath)
 		return fmt.Errorf("upsert video: %w", err)
 	}
-	if thumbReady {
-		// UpsertVideo 路径上 thumbnail_status 默认 'pending'，
-		// 这里再补一次确保为 'ready'。
+	if !thumbReady {
+		// 网站封面下载失败的视频：spider91 drive 的 thumb worker 按设计不
+		// 处理 spider91 视频（封面应是网站原图直接保存），所以没人接手。
+		// 显式标 'failed' 让 CountVideosNeedingThumbnail 排除（条件 status
+		// != 'failed'），否则 enqueueDriveGeneration → waitForThumbnailsBeforePreview
+		// 会因为 count > 0 把 teaser 入队永远卡在等待循环里。
 		_ = c.cfg.Catalog.UpdateVideoMeta(ctx, v.ID, catalog.VideoMetaPatch{
-			ThumbnailURL:    v.ThumbnailURL,
-			ThumbnailStatus: "ready",
+			ThumbnailStatus: "failed",
 		})
 	}
 	if c.cfg.OnNewVideo != nil {
@@ -474,19 +520,6 @@ func (c *Crawler) downloadAtomic(ctx context.Context, src, dst, referer string) 
 		return 0, err
 	}
 	return written, nil
-}
-
-// readSpiderOutput 读取 Python 写出的 JSON。
-func readSpiderOutput(path string) (*spiderOutput, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var out spiderOutput
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
 }
 
 // copyFileAtomic 把 src 复制到 dst，先写 .part 再 rename。

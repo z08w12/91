@@ -640,17 +640,11 @@ func (a *App) attachSpider91Crawler(d *catalog.Drive, drv *spider91.Driver) {
 		WorkDir:        filepath.Dir(scriptPath),
 		CommonThumbDir: a.commonThumbsDir(),
 		ProxyURL:       proxyURL,
-		OnNewVideo: func(v *catalog.Video) {
-			// 新视频入库后，触发 teaser worker（不需要 thumb worker，封面已就绪）
-			a.mu.Lock()
-			worker := a.workers[driveID]
-			a.mu.Unlock()
-			// 这里没有外层 ctx —— Crawler 是后台 worker，OnNewVideo 是 fire-and-forget 回调。
-			// 用 Background ctx 查 catalog 即可（teaserEnabledForDrive 内部仅做一次 GetDrive）。
-			if worker != nil && a.teaserEnabledForDrive(context.Background(), driveID) {
-				worker.Enqueue(v)
-			}
-		},
+		// 新流程：teaser 不在每条视频入库时立即入队，而是 RunOnce 全部下完后由
+		// runSpider91Crawl 统一调 enqueueDriveGeneration 一次性入队。这样：
+		//   - 下载阶段不和 ffmpeg 抢 CPU/IO
+		//   - "等待 teaser 队列 idle" 在 nightly Phase 2 的语义上更直观
+		// 不再传 OnNewVideo（crawler 内部的回调字段保留，仅为单测计数器之用）。
 	})
 
 	a.mu.Lock()
@@ -1201,6 +1195,17 @@ func (a *App) runSpider91Crawl(ctx context.Context, driveID string) {
 	if err := a.cat.UpsertDrive(ctx, d); err != nil {
 		log.Printf("[spider91] drive=%s update last_crawl_at: %v", driveID, err)
 	}
+
+	// 爬取全部完成后，统一把所有还 pending 的 teaser 入队。
+	// 这是新流水线设计：crawler 自身不再每条入库就立即触发 teaser 生成，
+	// 让"下载阶段"和"teaser 阶段"在时间上分清楚（也跟 nightly Phase 2
+	// 的"等 teaser 队列 idle"语义对齐）。enqueueDriveGeneration 内部会读
+	// 该 drive 当前的 teaser_enabled，关闭时是 noop。
+	a.mu.Lock()
+	worker := a.workers[driveID]
+	thumbWorker := a.thumbWorkers[driveID]
+	a.mu.Unlock()
+	a.enqueueDriveGeneration(ctx, driveID, worker, thumbWorker)
 }
 
 // spider91IntCred 解析 credentials 中的整数字段，缺省时返回 def。

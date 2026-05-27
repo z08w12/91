@@ -138,11 +138,18 @@ class Porn91Spider:
         quiet: bool = False,
         target_new: int = None,
         seen_viewkeys: list = None,
+        stream_output: bool = False,
     ):
         """
         构造函数。所有参数都有默认值，等同于使用脚本顶部的全局配置。
         backend 调用时会传 output_file/seen_viewkeys/target_new，等价于：
             "从第 1 页开始爬，跳过 seen_viewkeys 里的视频，凑够 target_new 个新视频后停止"
+
+        stream_output=True 时（backend 流水线用）：
+            - 每凑齐一个 video 直链就把该 entry 作为一行 JSON 写到 stdout 并 flush，
+              便于上层（Go crawler）边读边下载，不再等所有详情页处理完。
+            - 所有日志改走 stderr，避免与 stdout JSONL 流混合。
+            - --output 仍生效，作为离线归档用（脚本退出时一次性写完整 JSON）。
         """
         self.session = requests.Session()
         self.session.headers.update(HEADERS)
@@ -160,6 +167,10 @@ class Porn91Spider:
         # target_new 是 backend 触发时的核心模式：累计处理这么多新 viewkey 后退出。
         self.target_new = target_new if target_new and target_new > 0 else None
         self.quiet = bool(quiet)
+        # stream_output：每解析出一个 video 直链立即输出一行 JSON 到 stdout
+        # （配合 backend Go 端 bufio.Scanner 实时消费，下载一个就开始下一个）。
+        # 开启后所有 log 都走 stderr。
+        self.stream_output = bool(stream_output)
 
         # 添加重试适配器
         try:
@@ -212,9 +223,25 @@ class Porn91Spider:
                 pass
 
     def log(self, message: str):
-        """带时间戳的日志输出"""
+        """带时间戳的日志输出。stream_output 模式下走 stderr，避免污染 stdout JSONL。"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print(f"[{timestamp}] {message}")
+        line = f"[{timestamp}] {message}"
+        if self.stream_output:
+            print(line, file=sys.stderr, flush=True)
+        else:
+            print(line)
+
+    def emit_stream_video(self, video: dict):
+        """stream_output 模式下把单条 video entry 作为一行 JSON 写到 stdout 并立即刷盘。
+        Go 端 bufio.Scanner 按行读取，每收到一行就立即下载视频和封面。"""
+        if not self.stream_output:
+            return
+        try:
+            print(json.dumps(video, ensure_ascii=False), flush=True)
+        except Exception as e:
+            # stdout 异常基本只在管道断开时发生（消费方进程死了）；
+            # 写到 stderr 让 backend 看到，然后让 crawl 循环自己 break。
+            print(f"[stream] emit failed: {e}", file=sys.stderr, flush=True)
 
     def random_sleep(self, min_sec: float, max_sec: float):
         """随机延时，模拟人类行为"""
@@ -522,6 +549,8 @@ class Porn91Spider:
                 self.skip_viewkeys.add(video['viewkey'])
                 self.processed_videos += 1
                 self.log(f"  [OK] 成功提取视频直链")
+                # 流式：立刻把这条 entry 交给 Go 端开始下载，不等本批余下视频
+                self.emit_stream_video(video)
             else:
                 self.log(f"  [FAIL] 未找到视频直链: {video['viewkey']}")
                 video["video_url"] = ""
@@ -636,6 +665,9 @@ def main():
                         help="目标新增模式：从 page 1 起翻页直到累计处理这么多新 viewkey 后停止（backend 凌晨任务用）")
     parser.add_argument("--seen-viewkeys-file", type=str, default=None,
                         help="文件路径，每行一个已处理过的 viewkey；脚本会跳过这些视频不再请求详情页")
+    parser.add_argument("--stream-output", action="store_true",
+                        help="流式模式：每解析一条视频直链就立即把它作为一行 JSON 写到 stdout 并 flush；"
+                             "日志改走 stderr。配合 backend 边读边下载使用。")
 
     args, _ = parser.parse_known_args()
 
@@ -671,6 +703,7 @@ def main():
             quiet=args.quiet,
             target_new=args.target_new,
             seen_viewkeys=seen_viewkeys,
+            stream_output=args.stream_output,
         )
     elif args.page is not None:
         # 单页模式（保留作手动调试用）：start_page=N, max_pages=1
@@ -683,6 +716,7 @@ def main():
             resume=False,
             quiet=args.quiet,
             seen_viewkeys=seen_viewkeys,
+            stream_output=args.stream_output,
         )
     else:
         # 全量模式（向后兼容）：从 page 1 起爬到末尾
@@ -691,6 +725,7 @@ def main():
             resume=False if args.no_resume else None,
             quiet=args.quiet,
             seen_viewkeys=seen_viewkeys,
+            stream_output=args.stream_output,
         )
 
     try:

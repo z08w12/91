@@ -2,7 +2,7 @@ package spider91
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -46,45 +46,27 @@ func TestCrawlerRunOnceFullFlow(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// 2. 假 python 脚本：写一个 shell 脚本伪装成 python，解析 --output 参数后输出 JSON
-	jsonPayload := fmt.Sprintf(`{
-  "crawl_time": "2026-05-22T00:00:00",
-  "pages_crawled": 1,
-  "total_videos": 2,
-  "successful": 2,
-  "failed": 0,
-  "videos": [
-    {
-      "title": "Video One",
-      "thumb_url": "%s/thumbs/thumb1.jpg",
-      "video_url": "%s/videos/video1.mp4",
-      "viewkey": "vk-001",
-      "detail_url": "%s/v.php?viewkey=vk-001"
-    },
-    {
-      "title": "Video Two",
-      "thumb_url": "%s/thumbs/thumb2.jpg",
-      "video_url": "%s/videos/video2.mp4",
-      "viewkey": "vk-002",
-      "detail_url": "%s/v.php?viewkey=vk-002"
-    }
-  ]
-}`, srv.URL, srv.URL, srv.URL, srv.URL, srv.URL, srv.URL)
-
+	// 2. 假 python 脚本：解析 --output / --stream-output 参数，
+	//    在 stream 模式下逐行 echo 每条视频的 JSON 到 stdout（模拟 Python 端 stream），
+	//    同时仍写 --output 文件作归档。
+	videoEntries := []map[string]string{
+		{
+			"title":      "Video One",
+			"thumb_url":  srv.URL + "/thumbs/thumb1.jpg",
+			"video_url":  srv.URL + "/videos/video1.mp4",
+			"viewkey":    "vk-001",
+			"detail_url": srv.URL + "/v.php?viewkey=vk-001",
+		},
+		{
+			"title":      "Video Two",
+			"thumb_url":  srv.URL + "/thumbs/thumb2.jpg",
+			"video_url":  srv.URL + "/videos/video2.mp4",
+			"viewkey":    "vk-002",
+			"detail_url": srv.URL + "/v.php?viewkey=vk-002",
+		},
+	}
 	scriptPath := filepath.Join(tmp, "fake_spider.sh")
-	scriptBody := "#!/bin/sh\n" +
-		"# 解析 --output FILE 写入预设 JSON\n" +
-		"out=\"\"\n" +
-		"while [ $# -gt 0 ]; do\n" +
-		"  case \"$1\" in\n" +
-		"    --output) out=\"$2\"; shift 2;;\n" +
-		"    *) shift;;\n" +
-		"  esac\n" +
-		"done\n" +
-		"if [ -z \"$out\" ]; then echo no output >&2; exit 1; fi\n" +
-		"cat > \"$out\" <<'PAYLOAD'\n" +
-		jsonPayload + "\n" +
-		"PAYLOAD\n"
+	scriptBody := buildFakeSpiderScript(videoEntries)
 	if err := os.WriteFile(scriptPath, []byte(scriptBody), 0o755); err != nil {
 		t.Fatalf("write script: %v", err)
 	}
@@ -248,4 +230,142 @@ func TestCrawlerRunOnceMissingScript(t *testing.T) {
 	if _, err := c.RunOnce(context.Background(), 1); err == nil {
 		t.Fatalf("expected error for missing script")
 	}
+}
+
+
+// TestCrawlerThumbDownloadFailureMarksStatusFailed 验证：网站封面下载失败时
+// crawler 把 thumbnail_status 显式标 'failed'，避免 enqueueDriveGeneration 的
+// waitForThumbnailsBeforePreview 因为 count > 0 把 teaser 卡死等待。
+//
+// 历史 bug：之前 thumb 下载失败仅打 log，url='', status 走 schema DEFAULT 'pending'。
+// CountVideosNeedingThumbnail 条件是 url='' AND status != 'failed' → count=1。
+// spider91 drive 的 thumb worker 按设计不处理 spider91 视频 → 没人会改 status。
+// 结果 teaser 永远卡在 [preview] waiting for 1 thumbnails before teaser generation。
+func TestCrawlerThumbDownloadFailureMarksStatusFailed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-based fake script only on unix")
+	}
+	tmp := t.TempDir()
+
+	// 假 HTTP 服务器：thumb 路径返回 500，video 正常返回字节。
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "video.mp4"):
+			w.Header().Set("Content-Type", "video/mp4")
+			_, _ = w.Write([]byte("FAKEVIDEO"))
+		case strings.Contains(r.URL.Path, "thumb.jpg"):
+			http.Error(w, "broken", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	videoEntries := []map[string]string{
+		{
+			"title":      "Thumb Failure Video",
+			"thumb_url":  srv.URL + "/thumbs/thumb.jpg",
+			"video_url":  srv.URL + "/videos/video.mp4",
+			"viewkey":    "vk-thumb-fail",
+			"detail_url": srv.URL + "/v.php?viewkey=vk-thumb-fail",
+		},
+	}
+	scriptPath := filepath.Join(tmp, "fake.sh")
+	if err := os.WriteFile(scriptPath, []byte(buildFakeSpiderScript(videoEntries)), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	cat, err := catalog.Open(filepath.Join(tmp, "test.db"))
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	defer cat.Close()
+
+	driveID := "thumbfail-drive"
+	drv := New(Config{ID: driveID, RootDir: filepath.Join(tmp, "spider91", driveID)})
+	if err := cat.UpsertDrive(context.Background(), &catalog.Drive{
+		ID: driveID, Kind: Kind, Name: "thumbfail",
+	}); err != nil {
+		t.Fatalf("upsert drive: %v", err)
+	}
+
+	c := NewCrawler(CrawlerConfig{
+		Driver:          drv,
+		Catalog:         cat,
+		PythonPath:      "sh",
+		ScriptPath:      scriptPath,
+		CommonThumbDir:  filepath.Join(tmp, "previews", "thumbs"),
+		SpiderTimeout:   10 * time.Second,
+		DownloadTimeout: 10 * time.Second,
+	})
+
+	res, err := c.RunOnce(context.Background(), 5)
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if res.NewVideos != 1 {
+		t.Fatalf("expected 1 new video, got %d (failed=%d)", res.NewVideos, res.Failed)
+	}
+
+	got, err := cat.GetVideo(context.Background(), "spider91-"+driveID+"-vk-thumb-fail")
+	if err != nil {
+		t.Fatalf("get video: %v", err)
+	}
+	if got.ThumbnailURL != "" {
+		t.Errorf("ThumbnailURL = %q, want empty (download failed)", got.ThumbnailURL)
+	}
+
+	// 关键断言：CountVideosNeedingThumbnail 应该返回 0。
+	// 该函数的 SQL 条件是 `url = '' AND status != 'failed'`；如果 crawler 没把
+	// status 标 'failed'（schema DEFAULT 'pending'），count 就会是 1，外层
+	// waitForThumbnailsBeforePreview 会因为 count > 0 把 teaser 卡死等待。
+	count, err := cat.CountVideosNeedingThumbnail(context.Background(), driveID)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("CountVideosNeedingThumbnail = %d, want 0 (status should be 'failed' to unblock teaser worker)", count)
+	}
+}
+
+
+// buildFakeSpiderScript 生成一个伪 python 脚本（其实是 sh）。
+//
+// 行为：
+//   - 解析 --output FILE / --stream-output 两个 flag
+//   - --stream-output 时：逐行输出每个 entry 的 JSON 到 stdout 并 flush
+//   - --output 时：把完整 JSON 数据写到 FILE（向后兼容，且作归档）
+//
+// 用 sh 来写是为了避免 Python 依赖。每条 entry 的 JSON 用 Go marshal 出来后嵌入。
+func buildFakeSpiderScript(entries []map[string]string) string {
+	var sb strings.Builder
+	sb.WriteString("#!/bin/sh\n")
+	sb.WriteString("out=\"\"; stream=0\n")
+	sb.WriteString("while [ $# -gt 0 ]; do case \"$1\" in --output) out=\"$2\"; shift 2;; --stream-output) stream=1; shift;; *) shift;; esac; done\n")
+
+	// stream 模式：逐行 echo
+	sb.WriteString("if [ \"$stream\" = \"1\" ]; then\n")
+	for _, e := range entries {
+		raw, _ := json.Marshal(e)
+		// 用单引号 here-string 形式确保 JSON 中的双引号原样出来
+		sb.WriteString("  cat <<'STREAM_EOF'\n")
+		sb.Write(raw)
+		sb.WriteString("\nSTREAM_EOF\n")
+	}
+	sb.WriteString("fi\n")
+
+	// 写 --output 文件（带完整 wrapper）
+	sb.WriteString("if [ -n \"$out\" ]; then\n")
+	sb.WriteString("  mkdir -p \"$(dirname \"$out\")\" 2>/dev/null\n")
+	sb.WriteString("  cat > \"$out\" <<'OUT_EOF'\n")
+	wrapper := map[string]any{
+		"crawl_time":  "2026-01-01T00:00:00",
+		"total_videos": len(entries),
+		"videos":      entries,
+	}
+	wrapped, _ := json.MarshalIndent(wrapper, "", "  ")
+	sb.Write(wrapped)
+	sb.WriteString("\nOUT_EOF\n")
+	sb.WriteString("fi\n")
+	return sb.String()
 }
