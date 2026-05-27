@@ -77,7 +77,6 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	app.loadPreviewEnabled(ctx)
 	app.loadTheme(ctx)
 	app.loadSpider91UploadDriveID(ctx)
 	if err := app.attachLocalUpload(ctx); err != nil {
@@ -148,9 +147,17 @@ func main() {
 		GetDriveGenerationStatuses: func() map[string]api.DriveGenerationStatuses {
 			return app.driveGenerationStatuses()
 		},
-		GetPreviewEnabled: func() bool { return app.PreviewEnabled() },
-		SetPreviewEnabled: func(enabled bool) error {
-			return app.SetPreviewEnabled(ctx, enabled)
+		OnTeaserEnabledChanged: func(driveID string, enabled bool) {
+			// 从关到开时立刻补扫该盘 pending teaser，行为对齐旧的"全局开关从关到开"。
+			// 关闭分支不需要做事 —— 入队前会重新查 catalog，新的 enqueue 自然停。
+			if !enabled {
+				return
+			}
+			app.mu.Lock()
+			worker := app.workers[driveID]
+			thumbWorker := app.thumbWorkers[driveID]
+			app.mu.Unlock()
+			go app.enqueueDriveGeneration(ctx, driveID, worker, thumbWorker)
 		},
 		GetTheme: func() string { return app.Theme() },
 		SetTheme: func(theme string) error {
@@ -213,71 +220,31 @@ type App struct {
 	// spider91Crawlers 按 driveID 索引，每个 spider91 drive 独立一个 Crawler
 	spider91Crawlers map[string]*spider91.Crawler
 
-	// 运行时 preview 开关（从 DB 读）
-	previewEnabled bool
 	// 全站主题（"dark" | "pink"），从 DB 读
 	theme string
-	// 显式指定的 spider91 → PikPak 上传目标 drive ID；
-	// 未设置时由 Spider91UploadDriveID() 自动挑唯一的 PikPak drive。
+	// 显式指定的 spider91 上传目标 drive ID；
+	// 未设置时由 Spider91UploadDriveID() 在所有 pikpak/p115 drive 中自动挑选唯一一个。
 	spider91UploadDriveID string
 
-	// spider91Migrator 周期把 spider91 视频上传到 PikPak。
+	// spider91Migrator 周期把 spider91 视频上传到目标 drive（PikPak 或 115）。
 	spider91Migrator *spider91migrate.Migrator
 }
 
-// PreviewEnabled 线程安全读
-func (a *App) PreviewEnabled() bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.previewEnabled
-}
-
-// SetPreviewEnabled 切换开关，写库 + 若开启则立刻补扫 pending
-func (a *App) SetPreviewEnabled(ctx context.Context, enabled bool) error {
-	a.mu.Lock()
-	a.previewEnabled = enabled
-	a.mu.Unlock()
-
-	val := "0"
-	if enabled {
-		val = "1"
-	}
-	if err := a.cat.SetSetting(ctx, "preview.enabled", val); err != nil {
-		return err
-	}
-
-	if enabled {
-		// 异步补扫所有盘
-		go func() {
-			for _, d := range a.registry.All() {
-				a.mu.Lock()
-				w := a.workers[d.ID()]
-				tw := a.thumbWorkers[d.ID()]
-				a.mu.Unlock()
-				a.enqueueDriveGeneration(ctx, d.ID(), w, tw)
-			}
-		}()
-	}
-	return nil
-}
-
-// loadPreviewEnabled 从 DB 读运行时开关，首次启动取 config 默认值
-func (a *App) loadPreviewEnabled(ctx context.Context) {
-	def := "0"
-	if a.cfg.Preview.Enabled {
-		def = "1"
-	}
-	v, err := a.cat.GetSetting(ctx, "preview.enabled", def)
+// teaserEnabledForDrive 查询某个 drive 当前的 per-drive teaser 开关。
+//
+// teaser 生成不再由全局 setting 控制，而是由 catalog.drives.teaser_enabled
+// 决定。任何"是否入队 preview worker"的判断都应通过这个方法读，避免把状态
+// 散落到 App 内存里和 DB 不一致。
+//
+// 读 catalog 失败时退化成 false（不生成）：比 "默认开" 更安全 —— 读不到状态时
+// 倾向不消耗 ffmpeg；调用方会记日志，运维能立刻看到问题。
+func (a *App) teaserEnabledForDrive(ctx context.Context, driveID string) bool {
+	d, err := a.cat.GetDrive(ctx, driveID)
 	if err != nil {
-		log.Printf("[preview] load setting: %v (fallback to config)", err)
-		a.mu.Lock()
-		a.previewEnabled = a.cfg.Preview.Enabled
-		a.mu.Unlock()
-		return
+		log.Printf("[preview] read teaser_enabled drive=%s: %v (treating as disabled)", driveID, err)
+		return false
 	}
-	a.mu.Lock()
-	a.previewEnabled = v == "1"
-	a.mu.Unlock()
+	return d.TeaserEnabled
 }
 
 // Theme 线程安全读当前主题。
@@ -319,26 +286,33 @@ func (a *App) loadTheme(ctx context.Context) {
 	a.mu.Unlock()
 }
 
-// Spider91UploadDriveID 返回当前生效的 PikPak 上传目标 drive ID。
-// 优先返回管理员显式设置的值；未设置时，如果系统中只有一个 pikpak drive，
-// 返回它；多个或没有则返回空串（迁移 worker 跳过）。
+// Spider91UploadDriveID 返回当前生效的 spider91 上传目标 drive ID。
+//
+// 解析顺序：
+//  1. 管理员通过 PUT /admin/api/settings 显式设置过 → 验证该 drive 仍存在且是
+//     合法目标盘（pikpak 或 p115）→ 返回该 ID。
+//  2. 否则系统中如果只有一个合法目标盘（即 pikpak drive 数量+p115 drive 数量==1），
+//     自动返回它。这样单网盘场景"开箱即用"。
+//  3. 多个候选并存时返回空串：迁移 worker 静默跳过，等管理员显式指定。
+//
+// 注意"合法目标盘"目前是 pikpak ∪ p115。后续添加新的可上传盘要在两个分支同步加。
 func (a *App) Spider91UploadDriveID() string {
 	a.mu.Lock()
 	explicit := a.spider91UploadDriveID
 	a.mu.Unlock()
 	if explicit != "" {
-		// 验证显式设置的 drive 仍然存在且是 pikpak 类型；不在则降级到自动选取
-		if d, ok := a.registry.Get(explicit); ok && d.Kind() == "pikpak" {
+		// 验证显式设置的 drive 仍然存在且 kind 合法；不在则降级到自动选取
+		if d, ok := a.registry.Get(explicit); ok && isSpider91UploadKind(d.Kind()) {
 			return explicit
 		}
 	}
 	var found string
 	for _, d := range a.registry.All() {
-		if d.Kind() != "pikpak" {
+		if !isSpider91UploadKind(d.Kind()) {
 			continue
 		}
 		if found != "" {
-			// 多个 PikPak drive 时不自动选；管理员必须显式指定
+			// 多个候选 drive 时不自动选；管理员必须显式指定
 			return ""
 		}
 		found = d.ID()
@@ -346,9 +320,9 @@ func (a *App) Spider91UploadDriveID() string {
 	return found
 }
 
-// SetSpider91UploadDriveID 设置 PikPak 上传目标 drive ID 并持久化。
+// SetSpider91UploadDriveID 设置 spider91 上传目标 drive ID 并持久化。
 // 接受空字符串（清除显式设置，回退到自动模式）。
-// 设置一个不存在或不是 pikpak 类型的 drive 会返回错误。
+// 设置一个不存在或 kind 不是 pikpak / p115 的 drive 会返回错误。
 func (a *App) SetSpider91UploadDriveID(ctx context.Context, driveID string) error {
 	driveID = strings.TrimSpace(driveID)
 	if driveID != "" {
@@ -356,14 +330,20 @@ func (a *App) SetSpider91UploadDriveID(ctx context.Context, driveID string) erro
 		if !ok {
 			return fmt.Errorf("drive %q not found", driveID)
 		}
-		if d.Kind() != "pikpak" {
-			return fmt.Errorf("drive %q kind=%s, only pikpak can be spider91 upload target", driveID, d.Kind())
+		if !isSpider91UploadKind(d.Kind()) {
+			return fmt.Errorf("drive %q kind=%s, only pikpak or p115 can be spider91 upload target", driveID, d.Kind())
 		}
 	}
 	a.mu.Lock()
 	a.spider91UploadDriveID = driveID
 	a.mu.Unlock()
 	return a.cat.SetSetting(ctx, "spider91.upload_drive_id", driveID)
+}
+
+// isSpider91UploadKind 是 spider91 迁移目标盘的 allowlist。
+// 与 spider91migrate.adaptUploadTarget 的支持范围保持一致。
+func isSpider91UploadKind(kind string) bool {
+	return kind == "pikpak" || kind == "p115"
 }
 
 // loadSpider91UploadDriveID 从 DB 读上传目标 drive ID 设置；不存在时使用空串。
@@ -643,9 +623,10 @@ func (a *App) attachSpider91Crawler(d *catalog.Drive, drv *spider91.Driver) {
 			// 新视频入库后，触发 teaser worker（不需要 thumb worker，封面已就绪）
 			a.mu.Lock()
 			worker := a.workers[driveID]
-			previewEnabled := a.previewEnabled
 			a.mu.Unlock()
-			if previewEnabled && worker != nil {
+			// 这里没有外层 ctx —— Crawler 是后台 worker，OnNewVideo 是 fire-and-forget 回调。
+			// 用 Background ctx 查 catalog 即可（teaserEnabledForDrive 内部仅做一次 GetDrive）。
+			if worker != nil && a.teaserEnabledForDrive(context.Background(), driveID) {
 				worker.Enqueue(v)
 			}
 		},
@@ -730,10 +711,12 @@ func (a *App) enqueuePending(ctx context.Context, driveID string, w *preview.Wor
 }
 
 func (a *App) enqueueDriveGeneration(ctx context.Context, driveID string, worker *preview.Worker, thumbWorker *preview.ThumbWorker) {
+	// 封面 worker 始终入队（与早期"全局 preview.enabled=false 时仍然生成封面"
+	// 的行为一致）；teaser worker 仅在该 drive 的 TeaserEnabled 为 true 时入队。
 	if thumbWorker != nil {
 		a.enqueueThumbnails(ctx, driveID, thumbWorker)
 	}
-	if !a.PreviewEnabled() || worker == nil {
+	if worker == nil || !a.teaserEnabledForDrive(ctx, driveID) {
 		return
 	}
 	if thumbWorker != nil && !a.waitForThumbnailsBeforePreview(ctx, driveID) {
@@ -986,13 +969,12 @@ func (a *App) enqueueUploadedVideo(ctx context.Context, v *catalog.Video) {
 	a.mu.Lock()
 	worker := a.workers[v.DriveID]
 	thumbWorker := a.thumbWorkers[v.DriveID]
-	previewEnabled := a.previewEnabled
 	a.mu.Unlock()
 
 	if thumbWorker != nil && v.ThumbnailURL == "" {
 		thumbWorker.Enqueue(v)
 	}
-	if previewEnabled && worker != nil {
+	if worker != nil && a.teaserEnabledForDrive(ctx, v.DriveID) {
 		worker.Enqueue(v)
 	}
 }

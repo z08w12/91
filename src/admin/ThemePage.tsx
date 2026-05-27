@@ -78,10 +78,8 @@ export function ThemePage() {
     applyTheme(next);
     setSaving(next);
     try {
-      // PUT 时需要把 previewEnabled 也带上（后端不区分部分更新和整体更新）
-      const cur = await api.getSettings();
+      // PUT 时只带 theme 即可：后端按字段存在与否判断是否变更，不会顺手改其它设置。
       const resp = await api.updateSettings({
-        previewEnabled: cur.previewEnabled,
         theme: next,
       });
       // 以服务端响应为准（但只在响应里返了合法值时才覆盖；旧后端不识别

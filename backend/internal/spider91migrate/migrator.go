@@ -1,15 +1,15 @@
 // Package spider91migrate 周期性把 spider91 drive 下载到本地的视频
-// 上传到一个指定的 PikPak drive 目录，上传成功后：
+// 上传到一个指定的目标 drive 目录（PikPak 或 115），上传成功后：
 //
-//   - 改写 catalog 行：drive_id / file_id / content_hash 改成 PikPak 的；
+//   - 改写 catalog 行：drive_id / file_id / content_hash 改成目标盘的；
 //     视频自身的 id 不变（仍是 spider91-<driveID>-<viewkey>），video_tags、
 //     收藏、点赞、views 等关联数据全部保留
 //   - 删除本地 mp4（spider91/<id>/videos/<viewkey>.<ext>）和 thumb（spider91/<id>/thumbs/<viewkey>.jpg）
 //
-// 之后回放时，videoSource() 自动落到 /p/stream/<pikpak>/<file_id>，
-// proxy 层走 302 直连 PikPak CDN。
+// 之后回放时，videoSource() 自动落到 /p/stream/<target>/<file_id>，
+// proxy 层走对应盘的直链 / 302 直连。
 //
-// 下次 PikPak 扫盘时，scanner 通过 (content_hash) / (file_name+size)
+// 下次目标盘扫盘时，scanner 通过 (content_hash) / (file_name+size)
 // 已有的 findDuplicate 兜底逻辑，不会为同一物理文件再建一行。
 package spider91migrate
 
@@ -28,18 +28,95 @@ import (
 
 	"github.com/video-site/backend/internal/catalog"
 	"github.com/video-site/backend/internal/drives"
+	"github.com/video-site/backend/internal/drives/p115"
 	"github.com/video-site/backend/internal/drives/pikpak"
 	"github.com/video-site/backend/internal/drives/spider91"
 )
 
-// pikpakUploader 是 migrator 对 PikPak driver 的最小依赖接口。
-// *pikpak.Driver 实现了它；测试可以注入 fake。
-type pikpakUploader interface {
+// uploadTarget 是 migrator 调用目标 drive 的最小接口。任何一种"接收 spider91 上传"的
+// 网盘都要实现它；当前 PikPak 和 115 各自通过适配器满足。
+//
+// 这一层抽象把"迁移调用方"和"具体盘的 SDK 协议"解耦：
+//   - PikPak 走 GCID + OSS PutObject（pikpak.UploadResult）
+//   - 115   走 SHA1   + 秒传 / OSS / 分片（p115.UploadResult）
+//
+// 两个返回值都被归一成本地的 UploadResult，并在 catalog 改写阶段统一处理。
+type uploadTarget interface {
 	ID() string
 	Kind() string
 	RootID() string
-	UploadAndReportHash(ctx context.Context, parentID, name string, r io.Reader, size int64) (pikpak.UploadResult, error)
+	UploadAndReportHash(ctx context.Context, parentID, name string, r io.Reader, size int64) (UploadResult, error)
 	Rename(ctx context.Context, fileID, newName string) error
+}
+
+// UploadResult 是 uploadTarget.UploadAndReportHash 的归一返回。
+//
+// FileID  目标盘上的新文件 ID；
+// Hash    GCID（PikPak）或 SHA1 HEX 大写（115），写入 catalog.content_hash 用于跨盘去重；
+// Size    实际上传字节数。
+type UploadResult struct {
+	FileID string
+	Hash   string
+	Size   int64
+}
+
+// pikpakAdapter / p115Adapter 把具体 driver 包装成 uploadTarget。
+//
+// 之所以不让 driver 直接实现 uploadTarget：
+//
+//  1. 各 driver 的 UploadAndReportXxx 返回的是各自包内的 UploadResult 类型，
+//     直接共用同名同签名方法会引入循环依赖；
+//  2. driver 包不应该感知 spider91migrate 这一层业务定义。
+type pikpakAdapter struct {
+	d *pikpak.Driver
+}
+
+func (a *pikpakAdapter) ID() string     { return a.d.ID() }
+func (a *pikpakAdapter) Kind() string   { return a.d.Kind() }
+func (a *pikpakAdapter) RootID() string { return a.d.RootID() }
+func (a *pikpakAdapter) UploadAndReportHash(ctx context.Context, parentID, name string, r io.Reader, size int64) (UploadResult, error) {
+	res, err := a.d.UploadAndReportHash(ctx, parentID, name, r, size)
+	if err != nil {
+		return UploadResult{}, err
+	}
+	return UploadResult{FileID: res.FileID, Hash: res.Hash, Size: res.Size}, nil
+}
+func (a *pikpakAdapter) Rename(ctx context.Context, fileID, newName string) error {
+	return a.d.Rename(ctx, fileID, newName)
+}
+
+type p115Adapter struct {
+	d *p115.Driver
+}
+
+func (a *p115Adapter) ID() string     { return a.d.ID() }
+func (a *p115Adapter) Kind() string   { return a.d.Kind() }
+func (a *p115Adapter) RootID() string { return a.d.RootID() }
+func (a *p115Adapter) UploadAndReportHash(ctx context.Context, parentID, name string, r io.Reader, size int64) (UploadResult, error) {
+	res, err := a.d.UploadAndReportSha1(ctx, parentID, name, r, size)
+	if err != nil {
+		return UploadResult{}, err
+	}
+	return UploadResult{FileID: res.FileID, Hash: res.Sha1, Size: res.Size}, nil
+}
+func (a *p115Adapter) Rename(ctx context.Context, fileID, newName string) error {
+	return a.d.Rename(ctx, fileID, newName)
+}
+
+// adaptUploadTarget 把通用 drive 包装成 uploadTarget。
+// 不支持的盘 kind 返回 error；调用方静默跳过。
+func adaptUploadTarget(d drives.Drive) (uploadTarget, error) {
+	switch v := d.(type) {
+	case *pikpak.Driver:
+		return &pikpakAdapter{d: v}, nil
+	case *p115.Driver:
+		return &p115Adapter{d: v}, nil
+	case uploadTarget:
+		// 测试或自定义实现可以直接传入；优先使用具体类型分支以拿到适配器。
+		return v, nil
+	default:
+		return nil, fmt.Errorf("drive %q kind=%s does not support spider91 upload", d.ID(), d.Kind())
+	}
 }
 
 // Registry 是 worker 用来按 driveID 取 driver 的最小依赖。
@@ -292,13 +369,30 @@ func (m *Migrator) runOnce(ctx context.Context) {
 	if renamed, err := m.backfillFileNames(ctx, target, pp); err != nil {
 		log.Printf("[spider91migrate] backfill names: %v", err)
 	} else if renamed > 0 {
-		log.Printf("[spider91migrate] backfilled %d PikPak file name(s) to desired format", renamed)
+		log.Printf("[spider91migrate] backfilled %d %s file name(s) to desired format", renamed, m.targetKindForLog())
 	}
 }
 
-// resolveTarget 返回 (PikPak drive ID, PikPak driver, err)。
-// 没设置或 drive 找不到时返回 err（调用方静默跳过）。
-func (m *Migrator) resolveTarget() (string, pikpakUploader, error) {
+// targetKindForLog 把当前目标盘 kind 转成对人友好的简称，用于日志。
+// 解析失败时回退 "target"。
+func (m *Migrator) targetKindForLog() string {
+	if m.cfg.GetTargetDriveID == nil || m.cfg.Registry == nil {
+		return "target"
+	}
+	id := m.cfg.GetTargetDriveID()
+	if id == "" {
+		return "target"
+	}
+	d, ok := m.cfg.Registry.Get(id)
+	if !ok {
+		return "target"
+	}
+	return d.Kind()
+}
+
+// resolveTarget 返回 (target drive ID, target uploadTarget, err)。
+// 没设置、drive 找不到，或 drive 类型不支持上传时返回 err（调用方静默跳过）。
+func (m *Migrator) resolveTarget() (string, uploadTarget, error) {
 	if m.cfg.GetTargetDriveID == nil {
 		return "", nil, errors.New("no target getter")
 	}
@@ -310,11 +404,11 @@ func (m *Migrator) resolveTarget() (string, pikpakUploader, error) {
 	if !ok {
 		return "", nil, fmt.Errorf("target drive %q not in registry", id)
 	}
-	pp, ok := d.(pikpakUploader)
-	if !ok {
-		return "", nil, fmt.Errorf("target drive %q kind=%s, want pikpak", id, d.Kind())
+	t, err := adaptUploadTarget(d)
+	if err != nil {
+		return "", nil, err
 	}
-	return id, pp, nil
+	return id, t, nil
 }
 
 // spider91Drives 返回当前注册的所有 spider91 driver。
@@ -342,7 +436,7 @@ func (m *Migrator) spider91Drives() []*spider91.Driver {
 //   - 已经迁移过但本地还有残留 → 仅删本地（兜底）
 //
 // KeepLatestN < 0 时不保护任何本地文件，全部尝试迁移（旧行为，主要给测试用）。
-func (m *Migrator) migrateDrive(ctx context.Context, src *spider91.Driver, targetDriveID string, pp pikpakUploader) (int, error) {
+func (m *Migrator) migrateDrive(ctx context.Context, src *spider91.Driver, targetDriveID string, pp uploadTarget) (int, error) {
 	keepN := m.cfg.KeepLatestN
 	if keepN < 0 {
 		keepN = 0
@@ -443,7 +537,7 @@ func (m *Migrator) migrateDrive(ctx context.Context, src *spider91.Driver, targe
 // migrateOne 把单条 spider91 视频上传到 PikPak 并改写 catalog。
 // 返回 (true, nil) 表示真的迁了一条；(false, nil) 表示跳过（本地文件已不在等）；
 // (false, err) 表示真出错。
-func (m *Migrator) migrateOne(ctx context.Context, v *catalog.Video, src *spider91.Driver, targetDriveID string, pp pikpakUploader) (bool, error) {
+func (m *Migrator) migrateOne(ctx context.Context, v *catalog.Video, src *spider91.Driver, targetDriveID string, pp uploadTarget) (bool, error) {
 	path, err := src.VideoPath(v.FileID)
 	if err != nil {
 		return false, fmt.Errorf("resolve local path: %w", err)
@@ -467,28 +561,29 @@ func (m *Migrator) migrateOne(ctx context.Context, v *catalog.Video, src *spider
 	}
 	defer f.Close()
 
-	// 上传到 PikPak 的根目录（用户配置的 PikPak drive 的 rootID）。
+	// 上传到目标盘的根目录（用户配置的目标 drive 的 rootID）。
 	// 上传名走 desiredPikPakName 算出来的方案 B 格式：
 	//
 	//   <sanitized title>-<viewkey 后 8 位>.<ext>
 	//
-	// 这样 PikPak Web 端列出来的文件名能直接看出是哪个视频，
-	// 又用 viewkey 后 8 位避免同标题撞名。
+	// 这样网盘 Web 端列出来的文件名能直接看出是哪个视频，
+	// 又用 viewkey 后 8 位避免同标题撞名。两个目标盘（PikPak / 115）共用同一格式，
+	// 简化前端 / catalog 的认知。
 	parent := pp.RootID()
 	uploadName := desiredPikPakName(v.Title, extractViewKey(v.ID), v.Ext)
 	res, err := pp.UploadAndReportHash(ctx, parent, uploadName, f, info.Size())
 	if err != nil {
-		return false, fmt.Errorf("pikpak upload: %w", err)
+		return false, fmt.Errorf("%s upload: %w", pp.Kind(), err)
 	}
 	if res.FileID == "" {
-		return false, errors.New("pikpak returned empty file id")
+		return false, fmt.Errorf("%s returned empty file id", pp.Kind())
 	}
 
 	// 事务性改写 catalog 行：drive_id / file_id / content_hash
 	if err := m.cfg.Catalog.MigrateVideoToDrive(ctx, v.ID, targetDriveID, res.FileID, res.Hash); err != nil {
 		return false, fmt.Errorf("catalog migrate: %w", err)
 	}
-	// 同步 catalog 里的 file_name，让下次 PikPak 扫盘时 (file_name, size) 也能匹配上
+	// 同步 catalog 里的 file_name，让下次目标盘扫盘时 (file_name, size) 也能匹配上
 	if err := m.cfg.Catalog.UpdateVideoMeta(ctx, v.ID, catalog.VideoMetaPatch{FileName: uploadName}); err != nil {
 		log.Printf("[spider91migrate] %s update file_name after migrate: %v", v.ID, err)
 	}
@@ -496,7 +591,7 @@ func (m *Migrator) migrateOne(ctx context.Context, v *catalog.Video, src *spider
 	// 删除本地 mp4 和 thumb（thumb 在 previews/thumbs/ 还有副本，不影响展示）
 	CleanupSpider91Local(src, v.FileID)
 
-	log.Printf("[spider91migrate] %s migrated to drive=%s file=%s name=%q", v.ID, targetDriveID, res.FileID, uploadName)
+	log.Printf("[spider91migrate] %s migrated to drive=%s(kind=%s) file=%s name=%q", v.ID, targetDriveID, pp.Kind(), res.FileID, uploadName)
 	return true, nil
 }
 
@@ -594,14 +689,14 @@ func (m *Migrator) cleanupOldLocalVideos(ctx context.Context, src *spider91.Driv
 	return deleted, nil
 }
 
-// backfillFileNames 扫描 PikPak 目标 drive 下所有 spider91-* 起始 ID 的视频，
-// 对文件名不是 desiredPikPakName(...) 期望格式的，调 PikPak.Rename 修正，
+// backfillFileNames 扫描目标 drive（PikPak 或 115）下所有 spider91-* 起始 ID 的视频，
+// 对文件名不是 desiredPikPakName(...) 期望格式的，调 target.Rename 修正，
 // 并把 catalog.file_name 同步到新名字。
 //
 // 幂等：已经是期望格式的视频不会触发任何调用。
 //
 // 返回成功改名的条数。
-func (m *Migrator) backfillFileNames(ctx context.Context, targetDriveID string, pp pikpakUploader) (int, error) {
+func (m *Migrator) backfillFileNames(ctx context.Context, targetDriveID string, pp uploadTarget) (int, error) {
 	videos, err := m.cfg.Catalog.ListVideosByDriveID(ctx, targetDriveID, 10000)
 	if err != nil {
 		return 0, fmt.Errorf("list videos: %w", err)
@@ -627,9 +722,9 @@ func (m *Migrator) backfillFileNames(ctx context.Context, targetDriveID string, 
 		}
 		if err := m.cfg.Catalog.UpdateVideoMeta(ctx, v.ID, catalog.VideoMetaPatch{FileName: want}); err != nil {
 			log.Printf("[spider91migrate] %s update file_name after rename: %v", v.ID, err)
-			// PikPak 已经改名成功，但 catalog 更新失败 —— 下轮会重试。继续。
+			// 目标盘已经改名成功，但 catalog 更新失败 —— 下轮会重试。继续。
 		}
-		log.Printf("[spider91migrate] renamed %s on PikPak: %q -> %q", v.ID, v.FileName, want)
+		log.Printf("[spider91migrate] renamed %s on %s: %q -> %q", v.ID, pp.Kind(), v.FileName, want)
 		renamed++
 	}
 	return renamed, nil

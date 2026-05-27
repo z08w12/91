@@ -61,13 +61,16 @@ CREATE INDEX IF NOT EXISTS idx_video_tags_video ON video_tags(video_id);
 -- 网盘账户
 CREATE TABLE IF NOT EXISTS drives (
     id            TEXT PRIMARY KEY,
-    kind          TEXT NOT NULL,                -- quark / p115 / pikpak / wopan / onedrive
+    kind          TEXT NOT NULL,                -- quark / p115 / pikpak / wopan / onedrive / spider91
     name          TEXT NOT NULL,
     root_id       TEXT NOT NULL DEFAULT '0',
     scan_root_id  TEXT,                          -- 扫描起点（默认 root_id）
     credentials   TEXT,                          -- JSON: cookie / refresh_token 等
     status        TEXT DEFAULT 'disconnected',   -- disconnected / ok / error
     last_error    TEXT,
+    -- 是否给该盘生成 teaser/封面：1 开 / 0 关。
+    -- 替代了早期的全局 preview.enabled 设置（保留旧 setting 行不再读）。
+    teaser_enabled INTEGER NOT NULL DEFAULT 1,
     created_at    INTEGER NOT NULL,
     updated_at    INTEGER NOT NULL
 );

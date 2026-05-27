@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -25,9 +26,10 @@ type AdminServer struct {
 	OnRegenAllPreviews         func()
 	OnRegenFailedPreviews      func(driveID string)
 	GetDriveGenerationStatuses func() map[string]DriveGenerationStatuses
-	// Preview 开关读写
-	GetPreviewEnabled func() bool
-	SetPreviewEnabled func(enabled bool) error
+	// OnTeaserEnabledChanged 在 per-drive teaser 开关被切换后调用。
+	// enabled=true 时上层应该重新把 pending teaser 入队（类似旧的全局开关从关到开）；
+	// enabled=false 时通常不用做事 —— worker 入队前会再次查 catalog，自然停止。
+	OnTeaserEnabledChanged func(driveID string, enabled bool)
 	// Theme 读写（"dark" | "pink"）
 	GetTheme func() string
 	SetTheme func(theme string) error
@@ -65,6 +67,7 @@ func (a *AdminServer) Register(r chi.Router) {
 			r.Post("/drives", a.handleUpsertDrive)
 			r.Delete("/drives/{id}", a.handleDeleteDrive)
 			r.Post("/drives/{id}/rescan", a.handleRescan)
+			r.Post("/drives/{id}/teaser-enabled", a.handleSetDriveTeaserEnabled)
 			r.Post("/drives/{id}/previews/failed/regenerate", a.handleRegenFailedPreviews)
 
 			// 视频
@@ -156,6 +159,8 @@ func (a *AdminServer) handleListDrives(w http.ResponseWriter, r *http.Request) {
 		Status                    string           `json:"status"`
 		LastError                 string           `json:"lastError,omitempty"`
 		HasCredential             bool             `json:"hasCredential"`
+		// TeaserEnabled 控制是否给本盘生成 teaser/封面。前端用它在网盘列表/编辑表单展示开关状态。
+		TeaserEnabled bool `json:"teaserEnabled"`
 		// LastCrawlAt 是 spider91 上次成功爬取的 unix 秒（来自 credentials.last_crawl_at）。
 		// 其它 kind 留 0；前端用它显示"上次抓取: N 小时前"。
 		LastCrawlAt               int64            `json:"lastCrawlAt,omitempty"`
@@ -205,6 +210,7 @@ func (a *AdminServer) handleListDrives(w http.ResponseWriter, r *http.Request) {
 			RootID: d.RootID, ScanRootID: d.ScanRootID,
 			Status: d.Status, LastError: d.LastError,
 			HasCredential:             hasCred,
+			TeaserEnabled:             d.TeaserEnabled,
 			LastCrawlAt:               lastCrawlAt,
 			ThumbnailGenerationStatus: generation.Thumbnail,
 			PreviewGenerationStatus:   generation.Preview,
@@ -226,6 +232,10 @@ type upsertDriveReq struct {
 	RootID      string            `json:"rootId"`
 	ScanRootID  string            `json:"scanRootId"`
 	Credentials map[string]string `json:"credentials"`
+	// TeaserEnabled 是 per-drive teaser/封面生成开关。
+	// 用 *bool 区分 "未传" / "传了 false"：未传时表示客户端不打算改这个字段，
+	// 沿用 catalog 现有值；新建时未传一律默认开启（true）。
+	TeaserEnabled *bool `json:"teaserEnabled,omitempty"`
 }
 
 func (a *AdminServer) handleUpsertDrive(w http.ResponseWriter, r *http.Request) {
@@ -238,16 +248,33 @@ func (a *AdminServer) handleUpsertDrive(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "id and kind are required", http.StatusBadRequest)
 		return
 	}
-	if len(body.Credentials) == 0 {
-		if existing, err := a.Catalog.GetDrive(r.Context(), body.ID); err == nil && len(existing.Credentials) > 0 {
-			body.Credentials = existing.Credentials
-		}
+	// 凭证 / TeaserEnabled 都支持 "未传 = 沿用旧值"：先把现存 drive 拉出来一次。
+	var existing *catalog.Drive
+	if existingDrive, err := a.Catalog.GetDrive(r.Context(), body.ID); err == nil {
+		existing = existingDrive
 	}
+	if len(body.Credentials) == 0 && existing != nil && len(existing.Credentials) > 0 {
+		body.Credentials = existing.Credentials
+	}
+
+	// teaserEnabled 解析顺序：
+	//   1. 请求显式带了 → 用请求值
+	//   2. 请求没带 + 编辑现有 drive → 沿用旧值
+	//   3. 请求没带 + 新建 drive → 默认 true（用户没特别说就生成）
+	teaserEnabled := true
+	switch {
+	case body.TeaserEnabled != nil:
+		teaserEnabled = *body.TeaserEnabled
+	case existing != nil:
+		teaserEnabled = existing.TeaserEnabled
+	}
+
 	d := &catalog.Drive{
 		ID: body.ID, Kind: body.Kind, Name: body.Name,
 		RootID: body.RootID, ScanRootID: body.ScanRootID,
-		Credentials: body.Credentials,
-		Status:      "disconnected",
+		Credentials:   body.Credentials,
+		Status:        "disconnected",
+		TeaserEnabled: teaserEnabled,
 	}
 	if err := a.Catalog.UpsertDrive(r.Context(), d); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
@@ -280,6 +307,45 @@ func (a *AdminServer) handleRescan(w http.ResponseWriter, r *http.Request) {
 		a.OnScanRequested(id)
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
+}
+
+// teaserEnabledReq 是 POST /admin/api/drives/{id}/teaser-enabled 的入参。
+type teaserEnabledReq struct {
+	Enabled bool `json:"enabled"`
+}
+
+// handleSetDriveTeaserEnabled 切换某盘的 teaser 生成开关。
+//
+// 行为：
+//   - 写 catalog.drives.teaser_enabled
+//   - 调 OnTeaserEnabledChanged（main 注入；从关到开时会重新入队 pending teaser）
+//   - 返回切换后的新值，方便前端乐观更新但又能以服务端为准
+//
+// 与 upsertDrive 的区别：那条接口要重传 kind / name / rootId 等，开关切换不该
+// 牵连这些字段（顺手覆盖凭证或 rootID 容易出 bug）。所以单独走一条。
+func (a *AdminServer) handleSetDriveTeaserEnabled(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		http.Error(w, "id is required", http.StatusBadRequest)
+		return
+	}
+	var body teaserEnabledReq
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := a.Catalog.SetDriveTeaserEnabled(r.Context(), id, body.Enabled); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "drive not found", http.StatusNotFound)
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if a.OnTeaserEnabledChanged != nil {
+		a.OnTeaserEnabledChanged(id, body.Enabled)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "teaserEnabled": body.Enabled})
 }
 
 func (a *AdminServer) handleAdminListVideos(w http.ResponseWriter, r *http.Request) {
@@ -435,17 +501,17 @@ func (a *AdminServer) handleRegenFailedPreviews(w http.ResponseWriter, r *http.R
 
 // ---------- Settings ----------
 
+// settingsDTO 是 GET/PUT /admin/api/settings 的入参/出参。
+//
+// 注意：早期的全局 previewEnabled 字段已经下沉为每盘 teaser_enabled，
+// 不再出现在这里；前端要切换某个盘的 teaser 生成请用 POST /admin/api/drives 上传
+// teaserEnabled 字段。保留 settings 用作主题、spider91 上传目标这类全局配置。
 type settingsDTO struct {
-	PreviewEnabled        bool   `json:"previewEnabled"`
 	Theme                 string `json:"theme"`
 	Spider91UploadDriveID string `json:"spider91UploadDriveId"`
 }
 
 func (a *AdminServer) handleGetSettings(w http.ResponseWriter, r *http.Request) {
-	enabled := false
-	if a.GetPreviewEnabled != nil {
-		enabled = a.GetPreviewEnabled()
-	}
 	theme := "dark"
 	if a.GetTheme != nil {
 		if v := a.GetTheme(); v != "" {
@@ -457,31 +523,18 @@ func (a *AdminServer) handleGetSettings(w http.ResponseWriter, r *http.Request) 
 		spider91UploadID = a.GetSpider91UploadDriveID()
 	}
 	writeJSON(w, http.StatusOK, settingsDTO{
-		PreviewEnabled:        enabled,
 		Theme:                 theme,
 		Spider91UploadDriveID: spider91UploadID,
 	})
 }
 
 func (a *AdminServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
-	// 用 map 区分"没传"和"传了空字符串"两种语义；空 PikPak 上传 ID 表示
+	// 用 map 区分"没传"和"传了空字符串"两种语义；空 spider91 上传 ID 表示
 	// 清除显式设置（回退到自动模式）。
 	var raw map[string]json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
-	}
-
-	if v, ok := raw["previewEnabled"]; ok && a.SetPreviewEnabled != nil {
-		var enabled bool
-		if err := json.Unmarshal(v, &enabled); err != nil {
-			writeErr(w, http.StatusBadRequest, err)
-			return
-		}
-		if err := a.SetPreviewEnabled(enabled); err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
-			return
-		}
 	}
 
 	if v, ok := raw["theme"]; ok && a.SetTheme != nil {
@@ -512,9 +565,6 @@ func (a *AdminServer) handlePutSettings(w http.ResponseWriter, r *http.Request) 
 
 	// 回显当前值
 	resp := settingsDTO{}
-	if a.GetPreviewEnabled != nil {
-		resp.PreviewEnabled = a.GetPreviewEnabled()
-	}
 	if a.GetTheme != nil {
 		resp.Theme = a.GetTheme()
 	}

@@ -61,6 +61,8 @@ export type AdminDrive = {
   status: string;
   lastError?: string;
   hasCredential: boolean;
+  /** 当前是否给该盘生成 teaser/封面（per-drive 开关，替代旧的全局 preview.enabled）。 */
+  teaserEnabled: boolean;
   // spider91 上次成功爬取时间（unix 秒）；其它 kind 留空。
   lastCrawlAt?: number;
   thumbnailGenerationStatus?: DriveGenerationStatus;
@@ -126,6 +128,22 @@ export function rescan(id: string) {
   return request<{ ok: boolean }>(
     `/drives/${encodeURIComponent(id)}/rescan`,
     { method: "POST" }
+  );
+}
+
+/**
+ * 切换某个云盘的 teaser 生成开关。点击网盘列表里行内的 toggle 按钮时调用。
+ *
+ * 后端会写 catalog.drives.teaser_enabled，并在从关到开时立刻补扫该盘 pending teaser；
+ * 关闭分支不补做任何事，新的入队判断会自动停。
+ */
+export function setDriveTeaserEnabled(id: string, enabled: boolean) {
+  return request<{ ok: boolean; teaserEnabled: boolean }>(
+    `/drives/${encodeURIComponent(id)}/teaser-enabled`,
+    {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    }
   );
 }
 
@@ -230,15 +248,26 @@ export function createTag(label: string, aliases: string[]) {
 export type Theme = "dark" | "pink";
 
 export type Settings = {
-  previewEnabled: boolean;
   theme: Theme;
+  /**
+   * spider91 视频迁移到云盘时的目标 drive ID（必须是已挂载的 pikpak 或 p115 drive）。
+   * - 空字符串：自动模式。系统中如果只挂着一个 pikpak/p115 drive 就用它；多个并存时迁移会跳过。
+   * - 非空：显式指定。后端会校验 drive 存在且 kind ∈ {pikpak, p115}。
+   */
+  spider91UploadDriveId: string;
 };
 
 export function getSettings() {
   return request<Settings>("/settings");
 }
 
-export function updateSettings(body: Settings) {
+/**
+ * 更新设置。后端按字段存在与否判断是否变更，所以可以传 Partial 局部更新。
+ *
+ * 例：只切换主题，其它字段保持原状：
+ *   updateSettings({ theme: "pink" })
+ */
+export function updateSettings(body: Partial<Settings>) {
   return request<Settings>("/settings", {
     method: "PUT",
     body: JSON.stringify(body),

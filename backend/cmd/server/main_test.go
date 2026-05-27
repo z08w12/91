@@ -16,7 +16,7 @@ import (
 	"github.com/video-site/backend/internal/preview"
 )
 
-func TestRegisterPreviewWorkerBackfillsPendingWhenPreviewEnabled(t *testing.T) {
+func TestRegisterPreviewWorkerBackfillsPendingWhenDriveTeaserEnabled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -30,6 +30,7 @@ func TestRegisterPreviewWorkerBackfillsPendingWhenPreviewEnabled(t *testing.T) {
 		}
 	})
 
+	seedDriveWithTeaser(t, cat, "drive-id", true)
 	video := &catalog.Video{
 		ID:            "video-1",
 		DriveID:       "drive-id",
@@ -48,7 +49,6 @@ func TestRegisterPreviewWorkerBackfillsPendingWhenPreviewEnabled(t *testing.T) {
 		cat:            cat,
 		workers:        make(map[string]*preview.Worker),
 		thumbWorkers:   make(map[string]*preview.ThumbWorker),
-		previewEnabled: true,
 	}
 	worker := preview.NewWorker(&serverFakeTeaserGenerator{}, cat, &serverFakeDrive{})
 	go worker.Run(ctx)
@@ -91,6 +91,7 @@ func TestRegisterPreviewWorkersGenerateThumbnailsBeforePreviews(t *testing.T) {
 		}
 	})
 
+	seedDriveWithTeaser(t, cat, "drive-id", true)
 	now := time.Now()
 	for _, v := range []*catalog.Video{
 		{ID: "video-1", DriveID: "drive-id", FileID: "file-1", Title: "Clip 1", PreviewStatus: "pending"},
@@ -108,7 +109,6 @@ func TestRegisterPreviewWorkersGenerateThumbnailsBeforePreviews(t *testing.T) {
 		cat:            cat,
 		workers:        make(map[string]*preview.Worker),
 		thumbWorkers:   make(map[string]*preview.ThumbWorker),
-		previewEnabled: true,
 	}
 	gen := &serverFakeTeaserGenerator{}
 	drv := &serverFakeDrive{}
@@ -167,6 +167,7 @@ func TestFailedThumbnailsDoNotBlockPreviewGeneration(t *testing.T) {
 		}
 	})
 
+	seedDriveWithTeaser(t, cat, "drive-id", true)
 	now := time.Now()
 	video := &catalog.Video{
 		ID:            "video-failed-thumb",
@@ -196,7 +197,6 @@ func TestFailedThumbnailsDoNotBlockPreviewGeneration(t *testing.T) {
 		cat:            cat,
 		workers:        make(map[string]*preview.Worker),
 		thumbWorkers:   make(map[string]*preview.ThumbWorker),
-		previewEnabled: true,
 	}
 	gen := &serverFakeTeaserGenerator{}
 	drv := &serverFakeDrive{}
@@ -244,6 +244,8 @@ func TestRegenFailedPreviewsQueuesOnlyFailedVideosForDrive(t *testing.T) {
 		}
 	})
 
+	seedDriveWithTeaser(t, cat, "drive-id", true)
+	seedDriveWithTeaser(t, cat, "other-drive", true)
 	now := time.Now()
 	for _, v := range []*catalog.Video{
 		{ID: "target-failed", DriveID: "drive-id", FileID: "file-1", Title: "Target Failed", PreviewStatus: "failed"},
@@ -262,7 +264,6 @@ func TestRegenFailedPreviewsQueuesOnlyFailedVideosForDrive(t *testing.T) {
 		cat:            cat,
 		workers:        make(map[string]*preview.Worker),
 		thumbWorkers:   make(map[string]*preview.ThumbWorker),
-		previewEnabled: true,
 	}
 	worker := preview.NewWorker(&serverFakeTeaserGenerator{}, cat, &serverFakeDrive{})
 	go worker.Run(ctx)
@@ -324,6 +325,7 @@ func TestEnqueueUploadedVideoQueuesLocalPreviewWorker(t *testing.T) {
 		}
 	})
 
+	seedDriveWithTeaser(t, cat, "local-upload", true)
 	video := &catalog.Video{
 		ID:            "local-upload-video",
 		DriveID:       "local-upload",
@@ -342,7 +344,6 @@ func TestEnqueueUploadedVideoQueuesLocalPreviewWorker(t *testing.T) {
 		cat:            cat,
 		workers:        make(map[string]*preview.Worker),
 		thumbWorkers:   make(map[string]*preview.ThumbWorker),
-		previewEnabled: true,
 	}
 	worker := preview.NewWorker(&serverFakeTeaserGenerator{}, cat, &serverLocalUploadFakeDrive{})
 	go worker.Run(ctx)
@@ -581,3 +582,20 @@ type serverLocalUploadFakeDrive struct {
 }
 
 func (d *serverLocalUploadFakeDrive) ID() string { return "local-upload" }
+
+
+// seedDriveWithTeaser 在 catalog 里 upsert 一个测试用的 drive 行，把 TeaserEnabled
+// 设为 enabled。teaser 入队判断现在按 per-drive 而不是全局 setting，所以涉及到
+// teaser worker 的测试都要先把 drive 行写进 catalog。
+func seedDriveWithTeaser(t *testing.T, cat *catalog.Catalog, driveID string, enabled bool) {
+	t.Helper()
+	if err := cat.UpsertDrive(context.Background(), &catalog.Drive{
+		ID:            driveID,
+		Kind:          "fake",
+		Name:          driveID,
+		RootID:        "0",
+		TeaserEnabled: enabled,
+	}); err != nil {
+		t.Fatalf("seed drive: %v", err)
+	}
+}

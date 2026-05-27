@@ -44,12 +44,13 @@ func (r *fakeRegistry) All() []drives.Drive {
 	return out
 }
 
-// fakePikPak 实现 drives.Drive + pikpakUploader 接口。
+// fakePikPak 实现 drives.Drive + uploadTarget 接口（直接返回本包的 UploadResult，
+// 跳过 pikpakAdapter；这样测试不依赖真实 PikPak driver 的内部状态机）。
 type fakePikPak struct {
 	id          string
 	rootID      string
 	uploadCalls int
-	uploadFunc  func(ctx context.Context, parentID, name string, r io.Reader, size int64) (pikpak.UploadResult, error)
+	uploadFunc  func(ctx context.Context, parentID, name string, r io.Reader, size int64) (UploadResult, error)
 	mu          sync.Mutex
 	gotBodies   map[string][]byte
 	// renameCalls 记录每次 Rename 的 fileID->newName 历史，用于 backfill 测试断言。
@@ -88,7 +89,7 @@ func (d *fakePikPak) Rename(_ context.Context, fileID, newName string) error {
 	d.mu.Unlock()
 	return nil
 }
-func (d *fakePikPak) UploadAndReportHash(ctx context.Context, parentID, name string, r io.Reader, size int64) (pikpak.UploadResult, error) {
+func (d *fakePikPak) UploadAndReportHash(ctx context.Context, parentID, name string, r io.Reader, size int64) (UploadResult, error) {
 	d.mu.Lock()
 	d.uploadCalls++
 	d.mu.Unlock()
@@ -99,7 +100,7 @@ func (d *fakePikPak) UploadAndReportHash(ctx context.Context, parentID, name str
 	d.mu.Lock()
 	d.gotBodies[name] = body
 	d.mu.Unlock()
-	return pikpak.UploadResult{
+	return UploadResult{
 		FileID: "remote-" + name,
 		Hash:   "FAKEHASH40CHARSXXXXXXXXXXXXXXXXXXXXXXXXX",
 		Size:   int64(len(body)),
@@ -108,7 +109,23 @@ func (d *fakePikPak) UploadAndReportHash(ctx context.Context, parentID, name str
 
 // 编译期断言：fakePikPak 同时满足两个接口。
 var _ drives.Drive = (*fakePikPak)(nil)
-var _ pikpakUploader = (*fakePikPak)(nil)
+var _ uploadTarget = (*fakePikPak)(nil)
+
+// fakeP115 与 fakePikPak 等价，但 Kind 是 "p115"，用于验证 migrator 也能把视频
+// 正确地路由到 115 目标盘（走 p115Adapter 的实际逻辑则需要真实 driver；
+// 这里通过 adaptUploadTarget 的 uploadTarget 短路分支让 fakeP115 直接成为 target）。
+type fakeP115 struct {
+	*fakePikPak
+}
+
+func newFakeP115(id, rootID string) *fakeP115 {
+	return &fakeP115{fakePikPak: newFakePikPak(id, rootID)}
+}
+
+func (d *fakeP115) Kind() string { return "p115" }
+
+var _ drives.Drive = (*fakeP115)(nil)
+var _ uploadTarget = (*fakeP115)(nil)
 
 // TestBackfillFileNamesRenamesOnlyMismatchedSpider91Videos 验证回填逻辑：
 //
@@ -384,9 +401,9 @@ func TestRunOncePreservesStateOnUploadError(t *testing.T) {
 	cat := setupCatalog(t)
 	src, _ := setupSpider91(t)
 	pp := newFakePikPak("pikpak-target", "pikpak-root-id")
-	pp.uploadFunc = func(ctx context.Context, parentID, name string, r io.Reader, size int64) (pikpak.UploadResult, error) {
+	pp.uploadFunc = func(ctx context.Context, parentID, name string, r io.Reader, size int64) (UploadResult, error) {
 		_, _ = io.Copy(io.Discard, r) // 把字节读完，模拟到一半失败
-		return pikpak.UploadResult{}, errors.New("simulated network failure")
+		return UploadResult{}, errors.New("simulated network failure")
 	}
 	reg := newFakeRegistry()
 	reg.Add(src)
@@ -657,12 +674,12 @@ func TestRunOnceCoolsDownOnCaptchaErrorAndAbortsBatch(t *testing.T) {
 	cat := setupCatalog(t)
 	src, _ := setupSpider91(t)
 	pp := newFakePikPak("pikpak-target", "pikpak-root-id")
-	pp.uploadFunc = func(ctx context.Context, parentID, name string, r io.Reader, size int64) (pikpak.UploadResult, error) {
+	pp.uploadFunc = func(ctx context.Context, parentID, name string, r io.Reader, size int64) (UploadResult, error) {
 		_, _ = io.Copy(io.Discard, r)
 		// 模拟真实 PikPak 4002 错误：通过包装 *pikpak.APIError，
 		// pikpak.IsCaptchaError 应该能识别出来。
 		captcha := &pikpak.APIError{ErrorCode: 4002, ErrorMsg: "captcha_invalid", ErrorDescription: "Code(4002) - captcha_token expired"}
-		return pikpak.UploadResult{}, fmt.Errorf("pikpak upload: request session: %w", captcha)
+		return UploadResult{}, fmt.Errorf("pikpak upload: request session: %w", captcha)
 	}
 	reg := newFakeRegistry()
 	reg.Add(src)
@@ -729,18 +746,18 @@ func TestRunOnceResumesAfterCooldownExpires(t *testing.T) {
 
 	// 第一次：失败；第二次：成功。
 	var failOnce sync.Once
-	pp.uploadFunc = func(ctx context.Context, parentID, name string, r io.Reader, size int64) (pikpak.UploadResult, error) {
+	pp.uploadFunc = func(ctx context.Context, parentID, name string, r io.Reader, size int64) (UploadResult, error) {
 		body, _ := io.ReadAll(r)
 		var failed bool
 		failOnce.Do(func() { failed = true })
 		if failed {
 			captcha := &pikpak.APIError{ErrorCode: 4002, ErrorMsg: "captcha_invalid"}
-			return pikpak.UploadResult{}, fmt.Errorf("pikpak upload: request session: %w", captcha)
+			return UploadResult{}, fmt.Errorf("pikpak upload: request session: %w", captcha)
 		}
 		pp.mu.Lock()
 		pp.gotBodies[name] = body
 		pp.mu.Unlock()
-		return pikpak.UploadResult{
+		return UploadResult{
 			FileID: "remote-" + name,
 			Hash:   "FAKEHASH40CHARSXXXXXXXXXXXXXXXXXXXXXXXXX",
 			Size:   int64(len(body)),
@@ -797,18 +814,18 @@ func TestRunWakesWhenCooldownExpires(t *testing.T) {
 
 	migrated := make(chan struct{}, 1)
 	var failOnce sync.Once
-	pp.uploadFunc = func(ctx context.Context, parentID, name string, r io.Reader, size int64) (pikpak.UploadResult, error) {
+	pp.uploadFunc = func(ctx context.Context, parentID, name string, r io.Reader, size int64) (UploadResult, error) {
 		body, _ := io.ReadAll(r)
 		var failed bool
 		failOnce.Do(func() { failed = true })
 		if failed {
 			captcha := &pikpak.APIError{ErrorCode: 4002, ErrorMsg: "captcha_invalid"}
-			return pikpak.UploadResult{}, fmt.Errorf("pikpak upload: request session: %w", captcha)
+			return UploadResult{}, fmt.Errorf("pikpak upload: request session: %w", captcha)
 		}
 		pp.mu.Lock()
 		pp.gotBodies[name] = body
 		pp.mu.Unlock()
-		return pikpak.UploadResult{
+		return UploadResult{
 			FileID: "remote-" + name,
 			Hash:   "FAKEHASH40CHARSXXXXXXXXXXXXXXXXXXXXXXXXX",
 			Size:   int64(len(body)),
@@ -863,9 +880,9 @@ func TestNonCaptchaErrorDoesNotTriggerCooldown(t *testing.T) {
 	cat := setupCatalog(t)
 	src, _ := setupSpider91(t)
 	pp := newFakePikPak("pikpak-target", "pikpak-root-id")
-	pp.uploadFunc = func(ctx context.Context, parentID, name string, r io.Reader, size int64) (pikpak.UploadResult, error) {
+	pp.uploadFunc = func(ctx context.Context, parentID, name string, r io.Reader, size int64) (UploadResult, error) {
 		_, _ = io.Copy(io.Discard, r)
-		return pikpak.UploadResult{}, errors.New("simulated network failure")
+		return UploadResult{}, errors.New("simulated network failure")
 	}
 	reg := newFakeRegistry()
 	reg.Add(src)
@@ -891,5 +908,105 @@ func TestNonCaptchaErrorDoesNotTriggerCooldown(t *testing.T) {
 	}
 	if active, _ := m.inCooldown(); active {
 		t.Fatalf("non-captcha error should not trigger cooldown")
+	}
+}
+
+
+// TestRunOnceMigratesToP115Target 验证：当目标 drive 是 115（kind="p115"）时，
+// migrator 也能正确把 spider91 视频上传过去并改写 catalog。
+//
+// 这条路径与 PikPak 的核心区别：
+//   - 适配器走 p115Adapter 而不是 pikpakAdapter（这里通过 fakeP115 实现 uploadTarget
+//     直接短路 adaptUploadTarget 的 case *p115.Driver 分支，
+//     避免依赖真实 SDK 客户端）
+//   - 上传错误不会被 pikpak.IsCaptchaError 识别，不应触发冷却
+//   - catalog 写入逻辑（drive_id / file_id / content_hash / file_name）与 PikPak 完全一致
+func TestRunOnceMigratesToP115Target(t *testing.T) {
+	cat := setupCatalog(t)
+	src, _ := setupSpider91(t)
+	target := newFakeP115("p115-target", "p115-root-cid")
+	reg := newFakeRegistry()
+	reg.Add(src)
+	reg.Add(target)
+
+	now := time.Now()
+	id := writeSpider91Video(t, cat, src, "vk-115-001", ".mp4", []byte("video bytes 115"), now)
+
+	m := New(Config{
+		Catalog:          cat,
+		Registry:         reg,
+		GetTargetDriveID: func() string { return target.ID() },
+		Interval:         time.Hour,
+		KeepLatestN:      -1,
+	})
+	m.runOnce(context.Background())
+
+	if target.uploadCalls != 1 {
+		t.Fatalf("p115 upload calls = %d, want 1", target.uploadCalls)
+	}
+
+	got, err := cat.GetVideo(context.Background(), id)
+	if err != nil {
+		t.Fatalf("get video: %v", err)
+	}
+	if got.DriveID != target.ID() {
+		t.Fatalf("drive_id = %q, want %q", got.DriveID, target.ID())
+	}
+	wantName := "Sample vk-115-001-001.mp4"
+	if _, ok := target.gotBodies[wantName]; !ok {
+		t.Fatalf("p115 did not receive expected upload name %q (got names: %v)", wantName, keysOf(target.gotBodies))
+	}
+	if got.FileID != "remote-"+wantName {
+		t.Fatalf("file_id = %q, want %q", got.FileID, "remote-"+wantName)
+	}
+	if got.FileName != wantName {
+		t.Fatalf("file_name = %q, want %q", got.FileName, wantName)
+	}
+	if got.ContentHash == "" {
+		t.Fatal("content_hash should be set after p115 migration")
+	}
+
+	// 本地视频和 thumb 都应被删
+	videoPath, _ := src.VideoPath("vk-115-001.mp4")
+	if _, err := os.Stat(videoPath); !os.IsNotExist(err) {
+		t.Fatalf("local mp4 still exists after p115 migration or stat error: %v", err)
+	}
+	thumbPath, _ := src.ThumbPath("vk-115-001.jpg")
+	if _, err := os.Stat(thumbPath); !os.IsNotExist(err) {
+		t.Fatalf("local thumb still exists after p115 migration or stat error: %v", err)
+	}
+}
+
+// TestResolveTargetRejectsUnsupportedKind 验证当目标 drive 既不是 PikPak 也不是 115 时，
+// resolveTarget 拒绝并返回 error，让 runOnce 静默跳过（不会做破坏性变更）。
+func TestResolveTargetRejectsUnsupportedKind(t *testing.T) {
+	cat := setupCatalog(t)
+	src, _ := setupSpider91(t)
+	reg := newFakeRegistry()
+	reg.Add(src)
+	// spider91 自己也是 drives.Drive 但不是合法上传目标
+	other := src
+
+	m := New(Config{
+		Catalog:          cat,
+		Registry:         reg,
+		GetTargetDriveID: func() string { return other.ID() },
+	})
+
+	_, _, err := m.resolveTarget()
+	if err == nil {
+		t.Fatal("expected error for unsupported target kind, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not support spider91 upload") {
+		t.Fatalf("err = %v, want a 'does not support spider91 upload' message", err)
+	}
+
+	// runOnce 应静默无害
+	now := time.Now()
+	_ = writeSpider91Video(t, cat, src, "vk-bad-target", ".mp4", []byte("data"), now)
+	m.runOnce(context.Background())
+	videoPath, _ := src.VideoPath("vk-bad-target.mp4")
+	if _, err := os.Stat(videoPath); err != nil {
+		t.Fatalf("local mp4 should remain when target unsupported: %v", err)
 	}
 }

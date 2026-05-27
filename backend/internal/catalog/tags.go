@@ -51,6 +51,20 @@ func (c *Catalog) migrate(ctx context.Context) error {
 	if err := c.addColumnIfMissing(ctx, "videos", "thumbnail_status", "TEXT DEFAULT 'pending'"); err != nil {
 		return err
 	}
+	// drives.teaser_enabled：每盘 teaser 开关，替代旧的全局 preview.enabled。
+	// 升级路径：直接让 ALTER TABLE 的 DEFAULT 1 兜底 —— 每个现存 drive 都默认开启，
+	// 不读旧的 settings.preview.enabled 字段。这样老用户即便之前关过全局开关，
+	// 升级后所有盘也都恢复"默认生成 teaser"，跟新建保持一致。
+	if _, err := c.addColumnIfMissingReportNew(ctx, "drives", "teaser_enabled", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
+	}
+	// 一次性修正：早期版本（短暂存在过）会把现存 drive 的 teaser_enabled 同步成
+	// 旧的全局 preview.enabled 值，导致升级后所有 drive 都是关。"默认开启"约定下，
+	// 这里一次性把所有 drive 强制重置为 1，并用 marker setting 记号，避免之后
+	// 再覆盖用户后续在 UI 里 per-drive 改成关的设置。
+	if err := c.resetDriveTeaserEnabledToDefaultOnce(ctx); err != nil {
+		return err
+	}
 	if _, err := c.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_videos_content_hash ON videos(content_hash)`); err != nil {
 		return err
 	}
@@ -85,9 +99,19 @@ func (c *Catalog) migrate(ctx context.Context) error {
 }
 
 func (c *Catalog) addColumnIfMissing(ctx context.Context, table, column, definition string) error {
+	_, err := c.addColumnIfMissingReportNew(ctx, table, column, definition)
+	return err
+}
+
+// addColumnIfMissingReportNew 与 addColumnIfMissing 同步，但额外返回 added=true 表示
+// 本次确实创建了新列（即旧 schema 缺这列），方便调用方仅在迁移路径里补做一次性
+// 数据初始化（如把全局 setting 同步到新 per-drive 字段）。
+//
+// 已存在该列时返回 added=false，任何 ALTER TABLE 错误也直接透传。
+func (c *Catalog) addColumnIfMissingReportNew(ctx context.Context, table, column, definition string) (bool, error) {
 	rows, err := c.db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -97,14 +121,43 @@ func (c *Catalog) addColumnIfMissing(ctx context.Context, table, column, definit
 		var defaultValue any
 		var pk int
 		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
-			return err
+			return false, err
 		}
 		if strings.EqualFold(name, column) {
-			return nil
+			return false, nil
 		}
 	}
-	_, err = c.db.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN `+column+` `+definition)
-	return err
+	if _, err := c.db.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN `+column+` `+definition); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// resetDriveTeaserEnabledToDefaultOnce 把所有现存 drive 的 teaser_enabled 强制
+// 设为 1（开启），但仅在历史上没跑过这条迁移时执行（用 marker setting 记号）。
+//
+// 为什么需要：早期短暂存在过的版本会从旧的全局 preview.enabled = "0" 同步到
+// 所有 drive 的 teaser_enabled = 0；用户报告升级后页面全显示"Teaser 关"。新版
+// 约定 per-drive 默认开启，所以这里跑一次性修正。
+//
+// 幂等保证：marker setting 设过了就不再跑，确保用户在 UI 里把某盘关了不会被
+// 重启时反复打开。
+func (c *Catalog) resetDriveTeaserEnabledToDefaultOnce(ctx context.Context) error {
+	const markerKey = "drives.teaser_enabled.default_open_migrated"
+	marker, err := c.GetSetting(ctx, markerKey, "")
+	if err != nil {
+		return fmt.Errorf("read %s marker: %w", markerKey, err)
+	}
+	if strings.TrimSpace(marker) == "1" {
+		return nil
+	}
+	if _, err := c.db.ExecContext(ctx, `UPDATE drives SET teaser_enabled = 1, updated_at = ?`, time.Now().UnixMilli()); err != nil {
+		return fmt.Errorf("reset teaser_enabled to default: %w", err)
+	}
+	if err := c.SetSetting(ctx, markerKey, "1"); err != nil {
+		return fmt.Errorf("write %s marker: %w", markerKey, err)
+	}
+	return nil
 }
 
 func (c *Catalog) clearVolatileOneDriveThumbnails(ctx context.Context) error {

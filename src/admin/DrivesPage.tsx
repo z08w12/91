@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { Download, Plus, Power, PowerOff, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import * as api from "./api";
 import { useToast } from "./ToastContext";
 import { Modal } from "./Modal";
@@ -23,6 +23,15 @@ type FormState = {
   rootId: string;
   scanRootId: string;
   creds: Record<string, string>;
+  /**
+   * spider91 专用字段：把视频迁移到云盘的目标 drive ID。
+   * 实际值不会和 creds 一起 POST 到 /admin/api/drives，而是在 handleSave 里
+   * 单独通过 PUT /admin/api/settings 写到全局 setting。在 form state 里维护它
+   * 是为了让 DriveForm 能读写同一份编辑状态。
+   *
+   * 空字符串 = 自动模式（系统中唯一的 pikpak/p115 drive）。
+   */
+  spider91UploadDriveId: string;
 };
 
 const emptyForm: FormState = {
@@ -32,27 +41,40 @@ const emptyForm: FormState = {
   rootId: "0",
   scanRootId: "0",
   creds: {},
+  spider91UploadDriveId: "",
 };
 
 export function DrivesPage() {
   const [list, setList] = useState<api.AdminDrive[]>([]);
   const [storage, setStorage] = useState<api.AdminDriveStorage | null>(null);
+  const [settings, setSettings] = useState<api.Settings | null>(null);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [regenFailedId, setRegenFailedId] = useState("");
+  // togglingTeaserId 在请求未返回前禁用按钮，避免连点导致两次切换互相覆盖。
+  const [togglingTeaserId, setTogglingTeaserId] = useState("");
   const { show } = useToast();
+
+  // 当前系统中可作为 spider91 上传目标的 drive 列表（pikpak ∪ p115）。
+  // 用户保存 spider91 drive 时从这里挑一个；空表示走"自动"模式。
+  const uploadTargets = useMemo(
+    () => list.filter((d) => d.kind === "pikpak" || d.kind === "p115"),
+    [list]
+  );
 
   async function refresh() {
     setLoading(true);
     try {
-      const [data, storageData] = await Promise.all([
+      const [data, storageData, settingsData] = await Promise.all([
         api.listDrives(),
         api.getDriveStorage(),
+        api.getSettings().catch(() => null),
       ]);
       setList(data ?? []);
       setStorage(storageData);
+      if (settingsData) setSettings(settingsData);
     } catch (e) {
       show(e instanceof Error ? e.message : "加载失败", "error");
     } finally {
@@ -78,7 +100,12 @@ export function DrivesPage() {
   }, []);
 
   function openCreate() {
-    setForm(emptyForm);
+    // 创建时把全局 setting 当前值带进表单，方便用户在新建第一个 spider91 drive 时
+    // 直接看到当前的上传目标选择（一般是空 = 自动）。
+    setForm({
+      ...emptyForm,
+      spider91UploadDriveId: settings?.spider91UploadDriveId ?? "",
+    });
     setModalOpen(true);
   }
 
@@ -90,6 +117,7 @@ export function DrivesPage() {
       rootId: d.rootId,
       scanRootId: d.scanRootId || d.rootId,
       creds: {},
+      spider91UploadDriveId: settings?.spider91UploadDriveId ?? "",
     });
     setModalOpen(true);
   }
@@ -110,6 +138,29 @@ export function DrivesPage() {
         scanRootId: form.scanRootId || form.rootId || defaultRootId(form.kind),
         credentials: form.creds,
       });
+
+      // 仅当编辑/新建的是 spider91 drive 时，才同步全局上传目标 setting。
+      // 避免动其它类型 drive 的表单顺手覆盖了这个独立设置。
+      if (form.kind === "spider91" && form.spider91UploadDriveId !== (settings?.spider91UploadDriveId ?? "")) {
+        try {
+          const updated = await api.updateSettings({
+            spider91UploadDriveId: form.spider91UploadDriveId,
+          });
+          setSettings(updated);
+        } catch (settingsErr) {
+          // 不阻断主流程：drive 已经存了，setting 没存上，由 toast 提示用户手动重试
+          show(
+            settingsErr instanceof Error
+              ? `Drive 已保存，但上传目标设置失败：${settingsErr.message}`
+              : "上传目标设置失败",
+            "error"
+          );
+          setModalOpen(false);
+          refresh();
+          return;
+        }
+      }
+
       if (resp.warning) {
         show(`已保存，但 driver 初始化失败：${resp.warning}`, "error");
       } else {
@@ -158,6 +209,43 @@ export function DrivesPage() {
       show(e instanceof Error ? e.message : "触发失败", "error");
     } finally {
       setRegenFailedId("");
+    }
+  }
+
+  async function handleToggleTeaser(d: api.AdminDrive) {
+    const next = !d.teaserEnabled;
+    setTogglingTeaserId(d.id);
+    // 乐观更新本地状态，操作流畅；失败再回滚。
+    setList((prev) =>
+      prev.map((item) =>
+        item.id === d.id ? { ...item, teaserEnabled: next } : item
+      )
+    );
+    try {
+      const resp = await api.setDriveTeaserEnabled(d.id, next);
+      show(
+        resp.teaserEnabled
+          ? `已开启「${d.name || d.id}」的 Teaser 生成`
+          : `已关闭「${d.name || d.id}」的 Teaser 生成`,
+        "success"
+      );
+      // 以服务端响应为准（防止极端竞态）；并刷新计数等附属数据。
+      setList((prev) =>
+        prev.map((item) =>
+          item.id === d.id ? { ...item, teaserEnabled: resp.teaserEnabled } : item
+        )
+      );
+      refreshDriveList();
+    } catch (e) {
+      // 回滚乐观更新
+      setList((prev) =>
+        prev.map((item) =>
+          item.id === d.id ? { ...item, teaserEnabled: d.teaserEnabled } : item
+        )
+      );
+      show(e instanceof Error ? e.message : "切换失败", "error");
+    } finally {
+      setTogglingTeaserId("");
     }
   }
 
@@ -247,6 +335,25 @@ export function DrivesPage() {
                     )}
                   </button>{" "}
                   <button
+                    className={`admin-btn ${d.teaserEnabled ? "is-success" : ""}`}
+                    onClick={() => handleToggleTeaser(d)}
+                    disabled={togglingTeaserId === d.id}
+                    title={
+                      d.teaserEnabled
+                        ? "本盘 Teaser 生成已开启，点击关闭"
+                        : "本盘 Teaser 生成已关闭，点击开启"
+                    }
+                  >
+                    {d.teaserEnabled ? <Power size={13} /> : <PowerOff size={13} />}
+                    <span className="admin-btn__label">
+                      {togglingTeaserId === d.id
+                        ? "切换中..."
+                        : d.teaserEnabled
+                        ? "Teaser: 开"
+                        : "Teaser: 关"}
+                    </span>
+                  </button>{" "}
+                  <button
                     className="admin-btn"
                     disabled={(d.teaserFailedCount ?? 0) <= 0 || regenFailedId === d.id}
                     onClick={() => handleRegenFailed(d)}
@@ -288,7 +395,12 @@ export function DrivesPage() {
           </>
         }
       >
-        <DriveForm form={form} onChange={setForm} isEdit={!!list.find((x) => x.id === form.id)} />
+        <DriveForm
+          form={form}
+          onChange={setForm}
+          isEdit={!!list.find((x) => x.id === form.id)}
+          uploadTargets={uploadTargets}
+        />
       </Modal>
     </section>
   );
@@ -476,10 +588,12 @@ function DriveForm({
   form,
   onChange,
   isEdit,
+  uploadTargets,
 }: {
   form: FormState;
   onChange: (f: FormState) => void;
   isEdit: boolean;
+  uploadTargets: api.AdminDrive[];
 }) {
   const fields = useMemo(() => credentialFields(form.kind), [form.kind]);
 
@@ -583,6 +697,90 @@ function DriveForm({
           {f.help && <div className="admin-form__help">{f.help}</div>}
         </div>
       ))}
+
+      {form.kind === "spider91" && (
+        <>
+          <hr className="admin-form__divider" />
+          <Spider91UploadTargetField
+            value={form.spider91UploadDriveId}
+            onChange={(v) => set("spider91UploadDriveId", v)}
+            uploadTargets={uploadTargets}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Spider91UploadTargetField 是 spider91 drive 表单专属的"上传目标"下拉。
+ *
+ * 行为：
+ *   - 选项 = "（自动）" + 系统中所有 pikpak/p115 drive
+ *   - "自动" 模式（value=""）下，后端在迁移 worker 启动时挑唯一的目标盘；
+ *     系统中如果同时挂着 pikpak 和 p115 drive 必须显式选定，否则不会上传
+ *   - 没有任何 pikpak/p115 drive 时给一行提示文字，告诉用户先去添加目标盘
+ *   - 该字段写入的是全局 setting `spider91.upload_drive_id`，不是 drive 自己的
+ *     credentials —— 所有 spider91 drive 共享同一个上传目标
+ */
+function Spider91UploadTargetField({
+  value,
+  onChange,
+  uploadTargets,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  uploadTargets: api.AdminDrive[];
+}) {
+  // 文案根据系统中实际挂载的目标盘 kind 自适应：
+  //   - 只挂了 PikPak  → 文案只讲 "PikPak"
+  //   - 只挂了 115     → 文案只讲 "115 网盘"
+  //   - 两类都挂       → 文案讲 "PikPak / 115 网盘"
+  // 这样在单一类型场景下用户不会被另一类的字样干扰。
+  const kindsPresent = new Set(uploadTargets.map((d) => d.kind));
+  const hasPikPak = kindsPresent.has("pikpak");
+  const has115 = kindsPresent.has("p115");
+  const presentLabel =
+    hasPikPak && has115
+      ? "PikPak / 115 网盘"
+      : hasPikPak
+      ? "PikPak"
+      : has115
+      ? "115 网盘"
+      : "PikPak 或 115 网盘";
+
+  return (
+    <div className="admin-form__row">
+      <label>视频上传目标</label>
+      {uploadTargets.length === 0 ? (
+        <>
+          <select value="" disabled>
+            <option value="">（请先添加 {presentLabel}）</option>
+          </select>
+          <div className="admin-form__help">
+            spider91 爬下来的视频会保留在本地最近 15 个，更旧的会自动上传到选定的云盘。
+            目前系统里还没有 {presentLabel} drive，可以先把 spider91 保存好；之后再回来挂一个目标盘。
+          </div>
+        </>
+      ) : (
+        <>
+          <select value={value} onChange={(e) => onChange(e.target.value)}>
+            <option value="">（自动：唯一的 {presentLabel}）</option>
+            {uploadTargets.map((d) => (
+              <option key={d.id} value={d.id}>
+                {kindLabel[d.kind] ?? d.kind} · {d.name || d.id}
+              </option>
+            ))}
+          </select>
+          <div className="admin-form__help">
+            选定后，spider91 视频会被周期性上传到该云盘对应的根目录。
+            该设置全局生效；
+            {uploadTargets.length > 1
+              ? `如果同时挂着多个 ${presentLabel} drive，"自动"模式不会工作，必须显式选定一个。`
+              : `当前只挂着 1 个 ${presentLabel}，"自动"模式会直接选用它。`}
+          </div>
+        </>
+      )}
     </div>
   );
 }

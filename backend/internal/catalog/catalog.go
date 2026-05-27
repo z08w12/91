@@ -894,8 +894,11 @@ type Drive struct {
 	Credentials map[string]string `json:"credentials,omitempty"`
 	Status      string            `json:"status"`
 	LastError   string            `json:"lastError,omitempty"`
-	CreatedAt   time.Time         `json:"createdAt"`
-	UpdatedAt   time.Time         `json:"updatedAt"`
+	// TeaserEnabled 控制是否给本盘生成 teaser/封面。
+	// 替代早期的全局 preview.enabled 开关；新建 drive 时 UpsertDrive 默认置 true。
+	TeaserEnabled bool      `json:"teaserEnabled"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 func (c *Catalog) UpsertDrive(ctx context.Context, d *Drive) error {
@@ -906,24 +909,25 @@ func (c *Catalog) UpsertDrive(ctx context.Context, d *Drive) error {
 	}
 	d.UpdatedAt = time.UnixMilli(now)
 	_, err := c.db.ExecContext(ctx, `
-INSERT INTO drives (id, kind, name, root_id, scan_root_id, credentials, status, last_error, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO drives (id, kind, name, root_id, scan_root_id, credentials, status, last_error, teaser_enabled, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
-  kind         = excluded.kind,
-  name         = excluded.name,
-  root_id      = excluded.root_id,
-  scan_root_id = excluded.scan_root_id,
-  credentials  = excluded.credentials,
-  status       = excluded.status,
-  last_error   = excluded.last_error,
-  updated_at   = excluded.updated_at
-`, d.ID, d.Kind, d.Name, d.RootID, d.ScanRootID, string(cred), d.Status, d.LastError,
+  kind           = excluded.kind,
+  name           = excluded.name,
+  root_id        = excluded.root_id,
+  scan_root_id   = excluded.scan_root_id,
+  credentials    = excluded.credentials,
+  status         = excluded.status,
+  last_error     = excluded.last_error,
+  teaser_enabled = excluded.teaser_enabled,
+  updated_at     = excluded.updated_at
+`, d.ID, d.Kind, d.Name, d.RootID, d.ScanRootID, string(cred), d.Status, d.LastError, boolToInt(d.TeaserEnabled),
 		d.CreatedAt.UnixMilli(), d.UpdatedAt.UnixMilli())
 	return err
 }
 
 func (c *Catalog) ListDrives(ctx context.Context) ([]*Drive, error) {
-	rows, err := c.db.QueryContext(ctx, `SELECT id, kind, name, root_id, COALESCE(scan_root_id, ''), COALESCE(credentials, '{}'), status, COALESCE(last_error, ''), created_at, updated_at FROM drives ORDER BY created_at ASC`)
+	rows, err := c.db.QueryContext(ctx, `SELECT id, kind, name, root_id, COALESCE(scan_root_id, ''), COALESCE(credentials, '{}'), status, COALESCE(last_error, ''), COALESCE(teaser_enabled, 1), created_at, updated_at FROM drives ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -932,11 +936,13 @@ func (c *Catalog) ListDrives(ctx context.Context) ([]*Drive, error) {
 	for rows.Next() {
 		d := &Drive{}
 		var credsStr string
+		var teaserEnabled int
 		var createdAt, updatedAt int64
-		if err := rows.Scan(&d.ID, &d.Kind, &d.Name, &d.RootID, &d.ScanRootID, &credsStr, &d.Status, &d.LastError, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.Kind, &d.Name, &d.RootID, &d.ScanRootID, &credsStr, &d.Status, &d.LastError, &teaserEnabled, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(credsStr), &d.Credentials)
+		d.TeaserEnabled = teaserEnabled != 0
 		d.CreatedAt = time.UnixMilli(createdAt)
 		d.UpdatedAt = time.UnixMilli(updatedAt)
 		out = append(out, d)
@@ -945,14 +951,16 @@ func (c *Catalog) ListDrives(ctx context.Context) ([]*Drive, error) {
 }
 
 func (c *Catalog) GetDrive(ctx context.Context, id string) (*Drive, error) {
-	row := c.db.QueryRowContext(ctx, `SELECT id, kind, name, root_id, COALESCE(scan_root_id, ''), COALESCE(credentials, '{}'), status, COALESCE(last_error, ''), created_at, updated_at FROM drives WHERE id = ?`, id)
+	row := c.db.QueryRowContext(ctx, `SELECT id, kind, name, root_id, COALESCE(scan_root_id, ''), COALESCE(credentials, '{}'), status, COALESCE(last_error, ''), COALESCE(teaser_enabled, 1), created_at, updated_at FROM drives WHERE id = ?`, id)
 	d := &Drive{}
 	var credsStr string
+	var teaserEnabled int
 	var createdAt, updatedAt int64
-	if err := row.Scan(&d.ID, &d.Kind, &d.Name, &d.RootID, &d.ScanRootID, &credsStr, &d.Status, &d.LastError, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&d.ID, &d.Kind, &d.Name, &d.RootID, &d.ScanRootID, &credsStr, &d.Status, &d.LastError, &teaserEnabled, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(credsStr), &d.Credentials)
+	d.TeaserEnabled = teaserEnabled != 0
 	d.CreatedAt = time.UnixMilli(createdAt)
 	d.UpdatedAt = time.UnixMilli(updatedAt)
 	return d, nil
@@ -961,6 +969,28 @@ func (c *Catalog) GetDrive(ctx context.Context, id string) (*Drive, error) {
 func (c *Catalog) DeleteDrive(ctx context.Context, id string) error {
 	_, err := c.db.ExecContext(ctx, `DELETE FROM drives WHERE id = ?`, id)
 	return err
+}
+
+// SetDriveTeaserEnabled 切换某盘的 teaser/封面生成开关。
+//
+// 与 UpsertDrive 的区别：只动 teaser_enabled + updated_at 一列，不要求调用方
+// 重传 kind / name / credentials 等容易踩坑的字段。
+//
+// drive 不存在时返回 sql.ErrNoRows，调用方可以照此返回 404。
+func (c *Catalog) SetDriveTeaserEnabled(ctx context.Context, id string, enabled bool) error {
+	if id == "" {
+		return fmt.Errorf("catalog: set drive teaser_enabled: empty id")
+	}
+	res, err := c.db.ExecContext(ctx,
+		`UPDATE drives SET teaser_enabled = ?, updated_at = ? WHERE id = ?`,
+		boolToInt(enabled), time.Now().UnixMilli(), id)
+	if err != nil {
+		return err
+	}
+	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // ---------- Admin session ----------

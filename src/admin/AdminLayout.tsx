@@ -2,7 +2,6 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { HardDrive, Film, LogOut, Play, Home, Tags, Palette } from "lucide-react";
 import { useAuth } from "./AuthContext";
 import { useToast } from "./ToastContext";
-import { PreviewToggle } from "./PreviewToggle";
 
 export function AdminLayout() {
   const { logout } = useAuth();
@@ -66,7 +65,6 @@ export function AdminLayout() {
           </NavLink>
         </nav>
         <div className="admin-sidebar__footer">
-          <PreviewToggle />
           <button className="admin-sidebar__logout" onClick={handleLogout}>
             <LogOut size={14} style={{ verticalAlign: -2, marginRight: 4 }} />
             退出登录
