@@ -113,13 +113,27 @@ mkdir -p video-site-91 && cd video-site-91
 ```yaml
 services:
   video-site-91:
-    image: ghcr.io/nianzhibai/91:latest
+    image: ghcr.io/nianzhibai/91:stable
     container_name: video-site-91
     ports:
       - "9191:9191"
     volumes:
       - ./data:/opt/video-site-91/data
     restart: unless-stopped
+```
+
+`stable` 只会在发布 `v*` 正式 Release 时更新，不会跟随 `main` 分支开发镜像变化。
+升级到最新正式版：
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+如果想固定某个 Release 版本，可以改成明确的 tag，例如：
+
+```yaml
+image: ghcr.io/nianzhibai/91:v0.0.4
 ```
 
 或直接拉取仓库内置配置：
@@ -138,7 +152,7 @@ docker compose up -d
 
 ```bash
 docker compose logs -f       # 查看日志
-docker compose pull          # 拉取最新镜像
+docker compose pull          # 拉取最新正式版 stable 镜像
 docker compose up -d         # 更新并重启
 ```
 
