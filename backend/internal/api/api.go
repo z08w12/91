@@ -443,8 +443,9 @@ func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
 // shortsNextReq 客户端把当前轮已看过的 video id 列表传上来，
 // 服务器从未在列表中的视频里随机抽 count 个返回。
 type shortsNextReq struct {
-	SeenIDs []string `json:"seenIds"`
-	Count   int      `json:"count"`
+	SeenIDs              []string `json:"seenIds"`
+	Count                int      `json:"count"`
+	PreferredFromVideoID string   `json:"preferredFromVideoId"`
 }
 
 // ShortsItemDTO 是短视频流单条的精简结构。比 VideoDTO 多 videoSrc / poster，
@@ -490,7 +491,12 @@ func (s *Server) handleShortsNext(w http.ResponseWriter, r *http.Request) {
 		exclude = nil
 	}
 
-	items, err := s.Catalog.RandomVideosExcluding(r.Context(), exclude, count)
+	var items []*catalog.Video
+	if strings.TrimSpace(body.PreferredFromVideoID) != "" {
+		items, err = s.Catalog.RandomVideosForPreferredVideoExcluding(r.Context(), body.PreferredFromVideoID, exclude, count)
+	} else {
+		items, err = s.Catalog.RandomVideosExcluding(r.Context(), exclude, count)
+	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return

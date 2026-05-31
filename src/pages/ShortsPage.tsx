@@ -120,6 +120,8 @@ export default function ShortsPage() {
 
   // seenIds 用 ref 维护，方便在异步 callback 里读到最新值
   const seenIdsRef = useRef<string[]>(loadSeenIds());
+  const preferredFromVideoIdRef = useRef<string | null>(null);
+  const reportedPreferenceIdsRef = useRef<Set<string>>(new Set());
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   // 整个页面根元素，用于 requestFullscreen
@@ -183,6 +185,12 @@ export default function ShortsPage() {
     []
   );
 
+  const handlePreferenceReady = useCallback((item: ShortsItem) => {
+    if (reportedPreferenceIdsRef.current.has(item.id)) return;
+    reportedPreferenceIdsRef.current.add(item.id);
+    preferredFromVideoIdRef.current = item.id;
+  }, []);
+
   /**
    * 向后端请求下一批不重复的短视频，追加到 items 末尾。
    */
@@ -191,7 +199,11 @@ export default function ShortsPage() {
     setLoading(true);
     try {
       const seen = seenIdsRef.current;
-      const resp = await fetchShortsNext(seen, BATCH_SIZE);
+      const resp = await fetchShortsNext(
+        seen,
+        BATCH_SIZE,
+        preferredFromVideoIdRef.current ?? undefined
+      );
       if (resp.items.length === 0) {
         setEmpty((prev) => prev || true /* 维持 true 即可 */);
         setRoundComplete(true);
@@ -622,6 +634,7 @@ export default function ShortsPage() {
             onLikeToggle={handleLikeToggle}
             hasLiked={hasLiked}
             onHideSuccess={handleHideSuccess}
+            onPreferenceReady={handlePreferenceReady}
             showHud={showHud}
           />
         ))}
@@ -655,6 +668,7 @@ type SlideProps = {
   /** 父组件查询某 id 是否已经在本次会话内点过赞 */
   hasLiked: (videoId: string) => boolean;
   onHideSuccess: (index: number) => void;
+  onPreferenceReady: (item: ShortsItem) => void;
   showHud: (text: string, icon?: React.ReactNode) => void;
 };
 
@@ -678,6 +692,7 @@ function ShortsSlide({
   onLikeToggle,
   hasLiked,
   onHideSuccess,
+  onPreferenceReady,
   showHud,
 }: SlideProps) {
   const localRef = useRef<HTMLVideoElement | null>(null);
@@ -697,6 +712,8 @@ function ShortsSlide({
   const [scrubbing, setScrubbing] = useState(false);
   // 拖动开始时是否在播：用于拖完后判断要不要 resume
   const wasPlayingRef = useRef(true);
+
+  const preferenceFiredRef = useRef(false);
 
   // 点赞数和"是否已点过赞"状态。
   // 初始 likes 取自后端返回的列表项；isLiked 仅控制视觉态，
@@ -721,6 +738,10 @@ function ShortsSlide({
     setLikes(item.likes ?? 0);
     setIsLiked(hasLiked(item.id));
   }, [item.id, item.likes, hasLiked]);
+
+  useEffect(() => {
+    preferenceFiredRef.current = false;
+  }, [item.id]);
 
   const setRef = useCallback(
     (el: HTMLVideoElement | null) => {
@@ -770,6 +791,16 @@ function ShortsSlide({
     const handleTime = () => {
       // 拖动期间不要被 timeupdate 覆盖 UI
       if (!scrubbing) setCurrentTime(video.currentTime);
+      if (
+        isActive &&
+        shouldMount &&
+        !isMarkedHidden &&
+        !preferenceFiredRef.current &&
+        video.currentTime >= 3
+      ) {
+        preferenceFiredRef.current = true;
+        onPreferenceReady(item);
+      }
     };
     const handleWaiting = () => {
       setIsBuffering(true);
@@ -811,7 +842,7 @@ function ShortsSlide({
       video.removeEventListener("canplay", handlePlayingOrCanPlay);
       video.removeEventListener("volumechange", handleVolumeChange);
     };
-  }, [shouldMount, scrubbing, muted, volume, setMuted, setVolume]);
+  }, [shouldMount, scrubbing, muted, volume, setMuted, setVolume, isActive, isMarkedHidden, item, onPreferenceReady]);
 
   // 长按 2 倍速：直接绑原生事件
   useEffect(() => {

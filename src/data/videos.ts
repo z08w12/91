@@ -99,11 +99,12 @@ export type ShortsNextResponse = {
  */
 export function fetchShortsNext(
   seenIds: string[],
-  count: number
+  count: number,
+  preferredFromVideoId?: string
 ): Promise<ShortsNextResponse> {
   return apiJSON<ShortsNextResponse>("/api/shorts/next", {
     method: "POST",
-    body: JSON.stringify({ seenIds, count }),
+    body: JSON.stringify({ seenIds, count, preferredFromVideoId }),
   }).catch(() => ({ items: [], total: 0, roundComplete: false }));
 }
 
