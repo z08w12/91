@@ -41,6 +41,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tzdata \
     && rm -rf /var/lib/apt/lists/*
 
+RUN python3 -c "import requests, bs4, lxml, socks"
+
 WORKDIR /opt/video-site-91
 
 COPY --from=backend /out/server ./server

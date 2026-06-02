@@ -122,6 +122,27 @@ asset_name() {
   printf '%s-linux-%s.tar.gz' "$APP_NAME" "$ARCH"
 }
 
+verify_runtime_deps() {
+  local cmd
+  for cmd in curl tar ffmpeg ffprobe openssl python3; do
+    command -v "$cmd" >/dev/null 2>&1 || die "missing command: $cmd"
+  done
+
+  python3 - <<'PY' || die "missing Python modules for 91Spider: requests, bs4, lxml, socks"
+import importlib.util
+import sys
+
+missing = [
+    name
+    for name in ("requests", "bs4", "lxml", "socks")
+    if importlib.util.find_spec(name) is None
+]
+if missing:
+    print("missing Python modules: " + ", ".join(missing), file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 install_deps() {
   if [[ "$INSTALL_DEPS" != "1" ]]; then
     return
@@ -131,12 +152,11 @@ install_deps() {
     log "installing runtime dependencies"
     apt-get update
     apt-get install -y ca-certificates curl tar ffmpeg openssl iproute2 python3 python3-requests python3-bs4 python3-lxml python3-socks
+    verify_runtime_deps
     return
   fi
 
-  for cmd in curl tar ffmpeg ffprobe openssl; do
-    command -v "$cmd" >/dev/null 2>&1 || die "missing command: $cmd"
-  done
+  verify_runtime_deps
 }
 
 check_system() {
