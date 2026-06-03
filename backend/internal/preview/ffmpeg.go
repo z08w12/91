@@ -21,6 +21,7 @@ import (
 
 	"github.com/video-site/backend/internal/catalog"
 	"github.com/video-site/backend/internal/drives"
+	"github.com/video-site/backend/internal/mediaasset"
 )
 
 type Config struct {
@@ -269,7 +270,7 @@ func (g *Generator) GenerateThumbnail(ctx context.Context, link *drives.StreamLi
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	dst := filepath.Join(dir, videoID+".jpg")
+	dst := mediaasset.ThumbnailPath(g.cfg.LocalDir, videoID)
 
 	var lastErr error
 	offsets := thumbnailOffsets(duration)
@@ -966,7 +967,10 @@ func ffmpegOutputLooksRateLimited(output []byte) bool {
 
 // MoveToLocal 把临时文件改名到稳定位置，返回最终路径
 func (g *Generator) MoveToLocal(tmpPath, videoID string) (string, error) {
-	dst := filepath.Join(g.cfg.LocalDir, videoID+".mp4")
+	if err := os.MkdirAll(g.cfg.LocalDir, 0o755); err != nil {
+		return "", err
+	}
+	dst := mediaasset.PreviewPath(g.cfg.LocalDir, videoID)
 	if err := os.Rename(tmpPath, dst); err != nil {
 		// 跨盘 rename 可能失败，fallback 到 copy
 		if cerr := copyFile(tmpPath, dst); cerr != nil {

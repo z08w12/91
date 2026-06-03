@@ -25,6 +25,7 @@ import (
 	"github.com/video-site/backend/internal/drives/localstorage"
 	"github.com/video-site/backend/internal/drives/localupload"
 	"github.com/video-site/backend/internal/drives/spider91"
+	"github.com/video-site/backend/internal/mediaasset"
 	"github.com/video-site/backend/internal/proxy"
 )
 
@@ -860,14 +861,19 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleThumb(w http.ResponseWriter, r *http.Request) {
 	videoID := chi.URLParam(r, "videoID")
-	// 直接读本地 thumbs 目录中 <videoID>.jpg
-	path := filepath.Join(s.LocalDir, "thumbs", videoID+".jpg")
-	clean := filepath.Clean(path)
-	if !strings.HasPrefix(clean, filepath.Clean(s.LocalDir)) {
-		http.Error(w, "invalid path", http.StatusForbidden)
-		return
+	var clean string
+	for _, path := range mediaasset.ThumbnailPathCandidates(s.LocalDir, videoID) {
+		candidate := filepath.Clean(path)
+		if !strings.HasPrefix(candidate, filepath.Clean(s.LocalDir)) {
+			http.Error(w, "invalid path", http.StatusForbidden)
+			return
+		}
+		if _, err := os.Stat(candidate); err == nil {
+			clean = candidate
+			break
+		}
 	}
-	if _, err := os.Stat(clean); err != nil {
+	if clean == "" {
 		w.Header().Set("Cache-Control", "no-store")
 		http.NotFound(w, r)
 		return

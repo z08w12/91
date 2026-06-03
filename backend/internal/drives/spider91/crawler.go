@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/video-site/backend/internal/catalog"
+	"github.com/video-site/backend/internal/mediaasset"
 	"golang.org/x/net/proxy"
 )
 
@@ -525,7 +526,7 @@ func (c *Crawler) processOne(ctx context.Context, videoID string, item spiderVid
 			log.Printf("[spider91] drive=%s mkdir common thumbs: %v", c.cfg.Driver.ID(), err)
 			thumbReady = false
 		} else {
-			dst := filepath.Join(c.cfg.CommonThumbDir, videoID+".jpg")
+			dst := mediaasset.ThumbnailPathInDir(c.cfg.CommonThumbDir, videoID)
 			if err := copyFileAtomic(thumbPath, dst); err != nil {
 				log.Printf("[spider91] drive=%s viewkey=%s source_id=%s copy thumb to common dir: %v", c.cfg.Driver.ID(), viewkey, sourceID, err)
 				thumbReady = false

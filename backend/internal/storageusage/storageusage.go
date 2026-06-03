@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/video-site/backend/internal/mediaasset"
 )
 
 type VideoAssetRef struct {
@@ -71,14 +73,15 @@ func Compute(
 			continue
 		}
 		driveUsage := out.Drives[ref.DriveID]
-		thumbPath := filepath.Join(localDir, "thumbs", ref.ID+".jpg")
-		if size, exists, err := regularFileSize(thumbPath); err != nil {
-			return Usage{}, err
-		} else if exists {
-			key := ref.DriveID + "\x00thumb\x00" + thumbPath
-			if !seen[key] {
-				driveUsage.ThumbnailBytes += size
-				seen[key] = true
+		for _, thumbPath := range mediaasset.ThumbnailPathCandidates(localDir, ref.ID) {
+			if size, exists, err := regularFileSize(thumbPath); err != nil {
+				return Usage{}, err
+			} else if exists {
+				key := ref.DriveID + "\x00thumb\x00" + thumbPath
+				if !seen[key] {
+					driveUsage.ThumbnailBytes += size
+					seen[key] = true
+				}
 			}
 		}
 

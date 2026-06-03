@@ -36,6 +36,7 @@ import (
 	"github.com/video-site/backend/internal/drives/spider91"
 	"github.com/video-site/backend/internal/drives/wopan"
 	"github.com/video-site/backend/internal/fingerprint"
+	"github.com/video-site/backend/internal/mediaasset"
 	"github.com/video-site/backend/internal/nightly"
 	"github.com/video-site/backend/internal/preview"
 	"github.com/video-site/backend/internal/proxy"
@@ -1421,9 +1422,9 @@ func removeLocalVideoAssets(localDir string, v *catalog.Video) error {
 	}
 	candidates := []string{
 		v.PreviewLocal,
-		filepath.Join(localDir, v.ID+".mp4"),
-		filepath.Join(localDir, "thumbs", v.ID+".jpg"),
 	}
+	candidates = append(candidates, mediaasset.PreviewPathCandidates(localDir, v.ID)...)
+	candidates = append(candidates, mediaasset.ThumbnailPathCandidates(localDir, v.ID)...)
 	seen := make(map[string]struct{}, len(candidates))
 	for _, candidate := range candidates {
 		clean, ok := localPathWithin(localDir, candidate)
@@ -1540,14 +1541,35 @@ func cleanupDuplicateThumbnailAsset(localDir, videoID, thumbnailURL string) (cle
 	if thumbnailURL != "/p/thumb/"+videoID {
 		return false, false, false, nil
 	}
-	clean, ok := localPathWithin(localDir, filepath.Join(localDir, "thumbs", videoID+".jpg"))
-	if !ok {
+	candidates := mediaasset.ThumbnailPathCandidates(localDir, videoID)
+	seen := make(map[string]struct{}, len(candidates))
+	anyChecked := false
+	allMissing := true
+	for _, candidate := range candidates {
+		clean, ok := localPathWithin(localDir, candidate)
+		if !ok {
+			continue
+		}
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		anyChecked = true
+		removedOne, missingOne, removeErr := removeRegularFileIfExists(clean)
+		if removeErr != nil {
+			return false, false, false, removeErr
+		}
+		if removedOne {
+			removed = true
+		}
+		if !missingOne {
+			allMissing = false
+		}
+	}
+	if !anyChecked {
 		return false, false, false, nil
 	}
-	removed, missing, err = removeRegularFileIfExists(clean)
-	if err != nil {
-		return false, false, false, err
-	}
+	missing = allMissing && !removed
 	return true, removed, missing, nil
 }
 

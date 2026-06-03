@@ -33,6 +33,7 @@ import (
 	"github.com/video-site/backend/internal/drives/p115"
 	"github.com/video-site/backend/internal/drives/pikpak"
 	"github.com/video-site/backend/internal/drives/spider91"
+	"github.com/video-site/backend/internal/mediaasset"
 )
 
 // uploadTarget 是 migrator 调用目标 drive 的最小接口。任何一种"接收 spider91 上传"的
@@ -605,7 +606,7 @@ func (m *Migrator) preserveCrawledThumbnail(ctx context.Context, src *spider91.D
 		log.Printf("[spider91migrate] %s mkdir common thumbs: %v", v.ID, err)
 		return
 	}
-	dst := filepath.Join(commonDir, v.ID+".jpg")
+	dst := mediaasset.ThumbnailPathInDir(commonDir, v.ID)
 	if _, err := os.Stat(dst); err != nil {
 		if !os.IsNotExist(err) {
 			log.Printf("[spider91migrate] %s stat common thumb: %v", v.ID, err)

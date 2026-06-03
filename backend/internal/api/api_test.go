@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/video-site/backend/internal/catalog"
+	"github.com/video-site/backend/internal/mediaasset"
 	"github.com/video-site/backend/internal/proxy"
 )
 
@@ -549,6 +550,34 @@ func TestHandlePreviewIgnoresRemotePreviewFileIDAndServesLocalFile(t *testing.T)
 	}
 	if got := rr.Header().Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("Cache-Control = %q, want no-store", got)
+	}
+}
+
+func TestHandleThumbServesHashedPathForLongVideoID(t *testing.T) {
+	localDir := t.TempDir()
+	longID := "localstorage-" + strings.Repeat("x", 240)
+	thumbPath := mediaasset.ThumbnailPath(localDir, longID)
+	if err := os.MkdirAll(filepath.Dir(thumbPath), 0o755); err != nil {
+		t.Fatalf("mkdir thumb dir: %v", err)
+	}
+	if err := os.WriteFile(thumbPath, []byte("thumb-bytes"), 0o644); err != nil {
+		t.Fatalf("write thumb: %v", err)
+	}
+
+	server := &Server{
+		LocalDir: localDir,
+		Proxy:    proxy.New(proxy.NewRegistry()),
+	}
+	req := requestWithRouteParam(http.MethodGet, "/p/thumb/"+longID, "videoID", longID, strings.NewReader(``))
+	rr := httptest.NewRecorder()
+
+	server.handleThumb(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if rr.Body.String() != "thumb-bytes" {
+		t.Fatalf("body = %q, want thumb bytes", rr.Body.String())
 	}
 }
 

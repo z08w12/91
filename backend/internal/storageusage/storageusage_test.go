@@ -3,7 +3,10 @@ package storageusage
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/video-site/backend/internal/mediaasset"
 )
 
 func TestComputeCountsLocalThumbnailsAndTeasersByDrive(t *testing.T) {
@@ -13,6 +16,8 @@ func TestComputeCountsLocalThumbnailsAndTeasersByDrive(t *testing.T) {
 	}
 	writeSizedFile(t, filepath.Join(localDir, "thumbs", "video-a.jpg"), 3)
 	writeSizedFile(t, filepath.Join(localDir, "thumbs", "video-b.jpg"), 5)
+	longID := "localstorage-" + strings.Repeat("x", 240)
+	writeSizedFile(t, mediaasset.ThumbnailPath(localDir, longID), 13)
 	teaserA := filepath.Join(localDir, "video-a.mp4")
 	teaserB := filepath.Join(localDir, "video-b.mp4")
 	writeSizedFile(t, teaserA, 7)
@@ -24,6 +29,7 @@ func TestComputeCountsLocalThumbnailsAndTeasersByDrive(t *testing.T) {
 		{ID: "video-a", DriveID: "drive-a", PreviewLocal: teaserA},
 		{ID: "video-a-copy", DriveID: "drive-a", PreviewLocal: teaserA},
 		{ID: "video-b", DriveID: "drive-b", PreviewLocal: teaserB},
+		{ID: longID, DriveID: "drive-b"},
 		{ID: "outside", DriveID: "drive-b", PreviewLocal: outside},
 		{ID: "unknown-drive-video", DriveID: "missing", PreviewLocal: teaserB},
 	}, []string{"drive-a", "drive-b"}, func(string) (DiskStats, error) {
@@ -41,11 +47,11 @@ func TestComputeCountsLocalThumbnailsAndTeasersByDrive(t *testing.T) {
 		t.Fatalf("drive-a usage = %#v, want thumbnails=3 teaser=7 total=10", driveA)
 	}
 	driveB := got.Drives["drive-b"]
-	if driveB.ThumbnailBytes != 5 || driveB.TeaserBytes != 11 || driveB.TotalBytes != 16 {
-		t.Fatalf("drive-b usage = %#v, want thumbnails=5 teaser=11 total=16", driveB)
+	if driveB.ThumbnailBytes != 18 || driveB.TeaserBytes != 11 || driveB.TotalBytes != 29 {
+		t.Fatalf("drive-b usage = %#v, want thumbnails=18 teaser=11 total=29", driveB)
 	}
-	if got.ThumbnailBytes != 8 || got.TeaserBytes != 18 || got.TotalBytes != 26 {
-		t.Fatalf("totals = %#v, want thumbnails=8 teaser=18 total=26", got)
+	if got.ThumbnailBytes != 21 || got.TeaserBytes != 18 || got.TotalBytes != 39 {
+		t.Fatalf("totals = %#v, want thumbnails=21 teaser=18 total=39", got)
 	}
 }
 
