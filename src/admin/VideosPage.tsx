@@ -1,12 +1,14 @@
 import { useEffect, useId, useState } from "react";
-import { Edit, RefreshCw, Search, CheckSquare, Square, Image } from "lucide-react";
+import { ChevronDown, Edit, RefreshCw, Search, CheckSquare, Square, Image, Trash2 } from "lucide-react";
 import * as api from "./api";
 import { useToast } from "./ToastContext";
 import { Modal } from "./Modal";
 import { ConfirmModal } from "./ConfirmModal";
 import { formatBytes } from "./storageFormat";
 
-const PAGE_SIZE = 100;
+const DESKTOP_VIDEOS_PAGE_SIZE = 50;
+const MOBILE_VIDEOS_PAGE_SIZE = 20;
+const VIDEOS_MOBILE_QUERY = "(max-width: 640px)";
 
 export function VideosPage() {
   const [list, setList] = useState<api.AdminVideo[]>([]);
@@ -23,6 +25,11 @@ export function VideosPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchRegenOpen, setBatchRegenOpen] = useState(false);
   const [batchRegening, setBatchRegening] = useState(false);
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<api.AdminVideo | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const pageSize = useVideosPageSize();
   const { show } = useToast();
 
   async function refresh() {
@@ -30,7 +37,7 @@ export function VideosPage() {
     setLoadError("");
     try {
       const [r, tagList, driveList] = await Promise.all([
-        api.listVideos({ driveId, page, size: PAGE_SIZE, keyword: searchKeyword }),
+        api.listVideos({ driveId, page, size: pageSize, keyword: searchKeyword }),
         api.listTags(),
         api.listDrives(),
       ]);
@@ -50,7 +57,11 @@ export function VideosPage() {
 
   useEffect(() => {
     refresh();
-  }, [driveId, page, searchKeyword]);
+  }, [driveId, page, searchKeyword, pageSize]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [pageSize]);
 
   useEffect(() => {
     if (keyword === searchKeyword) return;
@@ -66,9 +77,9 @@ export function VideosPage() {
   );
 
   const listItems = list;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const pageStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const pageEnd = Math.min(total, page * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const pageStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const pageEnd = Math.min(total, page * pageSize);
   const listSummary = driveId
     ? `${driveNameMap.get(driveId) ?? driveId}：共 ${total} 个视频，第 ${page} / ${totalPages} 页，显示 ${pageStart}-${pageEnd}`
     : `全部网盘：共 ${total} 个视频，第 ${page} / ${totalPages} 页，显示 ${pageStart}-${pageEnd}`;
@@ -87,6 +98,11 @@ export function VideosPage() {
     setBatchRegenOpen(true);
   }
 
+  async function handleBatchDelete() {
+    if (selectedIds.size === 0) return;
+    setBatchDeleteOpen(true);
+  }
+
   async function confirmBatchRegen() {
     const ids = [...selectedIds];
     setBatchRegening(true);
@@ -103,6 +119,65 @@ export function VideosPage() {
       setBatchRegenOpen(false);
     } finally {
       setBatchRegening(false);
+    }
+  }
+
+  async function confirmDeleteVideo() {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    setDeleting(true);
+    try {
+      const result = await api.deleteVideo(target.id);
+      setDeleteTarget(null);
+      setSelectedIds((ids) => {
+        const next = new Set(ids);
+        next.delete(target.id);
+        return next;
+      });
+      show(result.deletedSource ? "已删除视频，并清理 91Spider 源文件" : "已删除视频", "success");
+      if (listItems.length === 1 && page > 1) {
+        setPage((p) => Math.max(1, p - 1));
+      } else {
+        refresh();
+      }
+    } catch (e) {
+      show(e instanceof Error ? e.message : "删除失败", "error");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function confirmBatchDelete() {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    setBatchDeleting(true);
+    try {
+      const results = await Promise.allSettled(
+        ids.map((id) => api.deleteVideo(id))
+      );
+      let success = 0;
+      let deletedSources = 0;
+      for (const r of results) {
+        if (r.status !== "fulfilled") continue;
+        success++;
+        if (r.value.deletedSource) deletedSources++;
+      }
+      const failed = ids.length - success;
+      if (failed === 0) {
+        const extra = deletedSources > 0 ? `，其中 ${deletedSources} 个清理了 91Spider 源文件` : "";
+        show(`批量删除完成，成功 ${success} 个${extra}`, "success");
+      } else {
+        show(`批量删除完成，成功 ${success} / ${ids.length} 个，失败 ${failed} 个`, success > 0 ? "info" : "error");
+      }
+      setSelectedIds(new Set());
+      setBatchDeleteOpen(false);
+      if (success >= listItems.length && page > 1) {
+        setPage((p) => Math.max(1, p - 1));
+      } else {
+        refresh();
+      }
+    } finally {
+      setBatchDeleting(false);
     }
   }
 
@@ -132,22 +207,25 @@ export function VideosPage() {
       <header className="admin-page__header">
         <h1 className="admin-page__title">视频管理</h1>
         <div className="admin-page__actions admin-videos-filter">
-          <select
-            className="admin-videos-filter__select"
-            value={driveId}
-            onChange={(e) => {
-              setDriveId(e.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="">全部网盘</option>
-            {drives.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name || d.id}（已生成 {d.teaserReadyCount ?? 0}，待生成{" "}
-                {d.teaserPendingCount ?? 0}）
-              </option>
-            ))}
-          </select>
+          <div className="admin-videos-filter__select-wrap">
+            <select
+              className="admin-videos-filter__select"
+              value={driveId}
+              onChange={(e) => {
+                setDriveId(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">全部网盘</option>
+              {drives.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name || d.id}（已生成 {d.teaserReadyCount ?? 0}，待生成{" "}
+                  {d.teaserPendingCount ?? 0}）
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={15} className="admin-videos-filter__select-icon" aria-hidden="true" />
+          </div>
           <form className="admin-videos-filter__search" onSubmit={handleSearchSubmit}>
             <Search size={14} className="admin-videos-filter__search-icon" />
             <input
@@ -163,37 +241,6 @@ export function VideosPage() {
         </div>
       </header>
 
-      {drives.length > 0 && (
-        <div className="admin-drive-teasers" aria-label="网盘预览视频统计">
-          {drives.map((d) => (
-            <button
-              key={d.id}
-              type="button"
-              className={`admin-drive-teaser${
-                driveId === d.id ? " is-active" : ""
-              }`}
-              onClick={() => {
-                setDriveId(d.id);
-                setPage(1);
-              }}
-            >
-              <span className="admin-drive-teaser__name">{d.name || d.id}</span>
-              <span className="admin-drive-teaser__metric is-ready">
-                已生成 {d.teaserReadyCount ?? 0}
-              </span>
-              <span className="admin-drive-teaser__metric is-pending">
-                待生成 {d.teaserPendingCount ?? 0}
-              </span>
-              {(d.teaserFailedCount ?? 0) > 0 && (
-                <span className="admin-drive-teaser__metric is-failed">
-                  失败 {d.teaserFailedCount}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-
       {!loading && (
         <div className="admin-videos-list-toolbar">
           <div className="admin-videos-summary">{listSummary}</div>
@@ -202,8 +249,11 @@ export function VideosPage() {
               <span className="admin-videos-bulk-actions__count">
                 已选择 {selectedIds.size} 项
               </span>
-              <button type="button" className="admin-btn is-primary" onClick={handleBatchRegen}>
+              <button type="button" className="admin-btn is-primary admin-videos-bulk-actions__btn" onClick={handleBatchRegen}>
                 <RefreshCw size={13} /> 批量重生预览视频
+              </button>
+              <button type="button" className="admin-btn is-danger admin-videos-bulk-actions__btn" onClick={handleBatchDelete}>
+                <Trash2 size={13} /> 批量删除
               </button>
             </div>
           )}
@@ -236,7 +286,7 @@ export function VideosPage() {
         </div>
       ) : (
         <>
-          <table className="admin-table is-selectable">
+          <table className="admin-table is-selectable admin-videos-table">
             <thead>
               <tr>
                 <th className="is-checkbox" style={{ width: '40px' }}>
@@ -278,6 +328,7 @@ export function VideosPage() {
                         {fileMeta(v)}
                       </div>
                     )}
+                    <VideoFileMetaPills video={v} />
                   </td>
                   <td data-label="作者">{v.author || <span className="admin-text-faint">—</span>}</td>
                   <td data-label="标签">
@@ -302,6 +353,9 @@ export function VideosPage() {
                     </button>{" "}
                     <button type="button" className="admin-btn" onClick={() => handleRegen(v)} title="重生预览视频">
                       <RefreshCw size={13} />
+                    </button>{" "}
+                    <button type="button" className="admin-btn is-danger" onClick={() => setDeleteTarget(v)} title="删除视频">
+                      <Trash2 size={13} />
                     </button>
                   </td>
                 </tr>
@@ -326,7 +380,7 @@ export function VideosPage() {
               上一页
             </button>
             <span className="admin-table-pagination__info">
-              第 {page} / {totalPages} 页，每页 {PAGE_SIZE} 个
+              第 {page} / {totalPages} 页，每页 {pageSize} 个
             </span>
             <button
               type="button"
@@ -370,6 +424,34 @@ export function VideosPage() {
         }}
         onConfirm={confirmBatchRegen}
       />
+      <ConfirmModal
+        open={deleteTarget !== null}
+        title="删除视频"
+        message={deleteTarget ? `确定要删除「${deleteTarget.title}」吗？` : ""}
+        confirmText="删除视频"
+        danger
+        centerMessage
+        modalClassName="admin-modal--delete-confirm"
+        loading={deleting}
+        onCancel={() => {
+          if (!deleting) setDeleteTarget(null);
+        }}
+        onConfirm={confirmDeleteVideo}
+      />
+      <ConfirmModal
+        open={batchDeleteOpen}
+        title="批量删除视频"
+        message={`确定要删除当前页选中的 ${selectedIds.size} 个视频吗？`}
+        confirmText="批量删除"
+        danger
+        centerMessage
+        modalClassName="admin-modal--delete-confirm"
+        loading={batchDeleting}
+        onCancel={() => {
+          if (!batchDeleting) setBatchDeleteOpen(false);
+        }}
+        onConfirm={confirmBatchDelete}
+      />
     </section>
   );
 }
@@ -381,11 +463,52 @@ function PreviewStatus({ s }: { s: string }) {
   return <span className="admin-status is-pending">待生成</span>;
 }
 
+function VideoFileMetaPills({ video }: { video: api.AdminVideo }) {
+  const parts = fileMetaParts(video);
+  const category = (video.category ?? "").trim();
+  if (parts.length === 0 && !category) return null;
+
+  return (
+    <div className="admin-video-filemeta-pills" aria-label="视频文件信息">
+      {parts.map((part, index) => (
+        <span key={`${part}-${index}`} className="admin-video-filemeta-pill">
+          {part}
+        </span>
+      ))}
+      {category && (
+        <span className="admin-video-filemeta-pill is-category">
+          {category}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function formatDur(sec: number): string {
   if (!sec) return "—";
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
+
+function useVideosPageSize() {
+  const [pageSize, setPageSize] = useState(() =>
+    window.matchMedia(VIDEOS_MOBILE_QUERY).matches
+      ? MOBILE_VIDEOS_PAGE_SIZE
+      : DESKTOP_VIDEOS_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia(VIDEOS_MOBILE_QUERY);
+    const update = () => {
+      setPageSize(media.matches ? MOBILE_VIDEOS_PAGE_SIZE : DESKTOP_VIDEOS_PAGE_SIZE);
+    };
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  return pageSize;
 }
 
 function EditVideoModal({
@@ -549,12 +672,15 @@ function EditVideoModal({
 }
 
 function fileMeta(v: api.AdminVideo): string {
-  const parts = [
+  return fileMetaParts(v).join(" · ");
+}
+
+function fileMetaParts(v: api.AdminVideo): string[] {
+  return [
     normalizeExt(v.ext),
     v.quality,
     v.size > 0 ? formatBytes(v.size) : "",
   ].filter(Boolean);
-  return parts.join(" · ");
 }
 
 function normalizeExt(ext: string): string {

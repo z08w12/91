@@ -239,9 +239,6 @@ export function TagsPage() {
                   onChange={(e) => setAliases(e.target.value)}
                   placeholder="逗号分隔，例如：纯欲, 清新"
                 />
-                <div className="admin-form__help">
-                  新增后会按别名和标签名匹配已有视频的标题、作者和目录并自动归类。
-                </div>
               </div>
               <button
                 type="submit"
@@ -495,12 +492,13 @@ export function TagsPage() {
         title={deleteConfirm?.kind === "bulk" ? "删除选中标签" : "删除标签"}
         message={
           deleteConfirm?.kind === "bulk"
-            ? `确定删除选中的 ${deleteConfirm.ids.length} 个标签吗？`
-            : `确定删除标签「${deleteConfirm?.tag.label ?? ""}」吗？`
+            ? `确定要删除选中的 ${deleteConfirm.ids.length} 个标签吗？`
+            : `确定要删除标签「${deleteConfirm?.tag.label ?? ""}」吗？`
         }
-        details={["此操作会从所有视频上移除相关标签。"]}
         confirmText="确认删除"
         danger
+        centerMessage
+        modalClassName="admin-modal--delete-confirm"
         loading={deletingId !== null || bulkDeleting}
         onCancel={() => {
           if (deletingId === null && !bulkDeleting) setDeleteConfirm(null);

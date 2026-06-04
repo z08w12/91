@@ -353,6 +353,13 @@ export function updateVideo(id: string, body: UpdateVideoInput) {
   });
 }
 
+export function deleteVideo(id: string) {
+  return request<{ ok: boolean; deletedSource: boolean }>(
+    `/videos/${encodeURIComponent(id)}`,
+    { method: "DELETE" }
+  );
+}
+
 export function regenPreview(id: string) {
   return request<{ ok: boolean }>(
     `/videos/${encodeURIComponent(id)}/regen-preview`,

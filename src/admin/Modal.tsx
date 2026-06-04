@@ -7,9 +7,10 @@ type Props = {
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
+  className?: string;
 };
 
-export function Modal({ open, title, onClose, children, footer }: Props) {
+export function Modal({ open, title, onClose, children, footer, className = "" }: Props) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
 
@@ -76,7 +77,7 @@ export function Modal({ open, title, onClose, children, footer }: Props) {
     >
       <div
         ref={dialogRef}
-        className="admin-modal"
+        className={`admin-modal${className ? ` ${className}` : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

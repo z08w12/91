@@ -6,6 +6,10 @@ const adminCss = readFileSync(
   new URL("../src/styles/admin.css", import.meta.url),
   "utf8"
 );
+const videosPageSource = readFileSync(
+  new URL("../src/admin/VideosPage.tsx", import.meta.url),
+  "utf8"
+);
 
 function ruleBody(css: string, selector: string): string {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -66,6 +70,63 @@ test("admin tables scroll inside the mobile viewport", () => {
   assert.match(body, /display\s*:\s*block/);
 });
 
+test("admin video filter select uses an aligned custom arrow", () => {
+  const select = ruleBody(adminCss, ".admin-videos-filter__select");
+  const icon = ruleBody(adminCss, ".admin-videos-filter__select-icon");
+  const mobileWrap = ruleBodyByContains(mobileCss(), ".admin-videos-filter__select-wrap");
+
+  assert.match(select, /appearance\s*:\s*none/);
+  assert.match(select, /padding\s*:\s*0\s+36px\s+0\s+var\(--space-3\)/);
+  assert.match(icon, /top\s*:\s*50%/);
+  assert.match(icon, /right\s*:\s*12px/);
+  assert.match(icon, /transform\s*:\s*translateY\(-50%\)/);
+  assert.match(mobileWrap, /flex\s*:\s*1\s+1\s+100%/);
+});
+
+test("admin video bulk actions use semantic theme colors", () => {
+  const base = ruleBody(adminCss, ".admin-videos-bulk-actions__btn");
+  const primary = ruleBody(adminCss, ".admin-videos-bulk-actions__btn.is-primary");
+  const danger = ruleBody(adminCss, ".admin-videos-bulk-actions__btn.is-danger");
+  const dangerHover = ruleBody(adminCss, ".admin-videos-bulk-actions__btn.is-danger:hover:not(:disabled)");
+  const bulkBodies = [base, primary, danger, dangerHover].join("\n");
+
+  assert.match(videosPageSource, /className="admin-btn is-primary admin-videos-bulk-actions__btn"/);
+  assert.match(videosPageSource, /className="admin-btn is-danger admin-videos-bulk-actions__btn"/);
+  assert.match(primary, /var\(--accent-glow\)/);
+  assert.match(danger, /background\s*:\s*var\(--danger-soft\)/);
+  assert.match(danger, /border-color\s*:\s*var\(--danger\)/);
+  assert.match(danger, /color\s*:\s*var\(--danger\)/);
+  assert.match(dangerHover, /background\s*:\s*var\(--danger\)/);
+  assert.doesNotMatch(bulkBodies, /#ff5b8a|#fff6f9|rgba\(255,\s*91,\s*138/);
+});
+
+test("mobile video management uses compact theme-aware video cards", () => {
+  const css = mobileCss();
+  const card = ruleBody(css, ".admin-videos-table:not(.admin-drives-table) tr");
+  const title = ruleBody(css, ".admin-videos-table:not(.admin-drives-table) td[data-label=\"标题\"]");
+  const label = ruleBody(css, ".admin-videos-table:not(.admin-drives-table) td::before");
+  const pills = ruleBody(css, ".admin-videos-table:not(.admin-drives-table) .admin-video-filemeta-pills");
+  const sourceColumn = ruleBodyByContains(css, ".admin-videos-table:not(.admin-drives-table) td[data-label=\"来源\"]");
+  const actionButton = ruleBody(css, ".admin-videos-table:not(.admin-drives-table) td.is-actions .admin-btn");
+  const dangerButton = ruleBody(css, ".admin-videos-table:not(.admin-drives-table) td.is-actions .admin-btn.is-danger");
+
+  assert.match(card, /--admin-video-card-bg\s*:\s*var\(--bg-surface\)/);
+  assert.match(card, /background\s*:\s*var\(--admin-video-card-bg\)/);
+  assert.match(card, /border-radius\s*:\s*14px/);
+  assert.match(card, /padding\s*:\s*12px\s+14px/);
+  assert.match(css, /:root:not\(\[data-theme="pink"\]\)\s+\.admin-videos-table:not\(\.admin-drives-table\)\s+tr\s*\{[^}]*--admin-video-card-bg\s*:\s*#1e1e1e/s);
+  assert.match(css, /:root\[data-theme="pink"\]\s+\.admin-videos-table:not\(\.admin-drives-table\)\s+tr\s*\{/);
+  assert.match(title, /padding-left\s*:\s*36px/);
+  assert.match(label, /font-size\s*:\s*10px/);
+  assert.match(label, /letter-spacing\s*:\s*0\.06em/);
+  assert.match(pills, /display\s*:\s*flex/);
+  assert.doesNotMatch(sourceColumn, /border-left/);
+  assert.match(actionButton, /height\s*:\s*28px/);
+  assert.match(actionButton, /border-radius\s*:\s*8px/);
+  assert.match(dangerButton, /border-color\s*:\s*var\(--admin-video-card-danger-border\)/);
+  assert.match(dangerButton, /color\s*:\s*var\(--admin-video-card-danger\)/);
+});
+
 test("admin modals and action footers adapt on mobile", () => {
   const css = mobileCss();
 
@@ -74,6 +135,10 @@ test("admin modals and action footers adapt on mobile", () => {
   assert.match(ruleBody(adminCss, ".admin-modal"), /width\s*:\s*min\(\d+px,\s*100%\)/);
   // 多按钮 footer 在 mobile 下要换行避免溢出。
   assert.match(allRuleBodies(css, ".admin-modal__footer"), /flex-wrap\s*:\s*wrap/);
+  // 删除/放弃类确认弹窗在 mobile 下不能跟随通用 modal stretch 到顶部。
+  const confirmModal = ruleBody(css, ".admin-modal--delete-confirm");
+  assert.match(confirmModal, /align-self\s*:\s*center/);
+  assert.match(confirmModal, /justify-self\s*:\s*center/);
   // 表单 input/select/textarea 在 mobile 下铺满。规则用逗号合并写法（多 selector
   // 共享 body），所以走 ruleBodyByContains 而不是简单正则。
   assert.match(ruleBodyByContains(css, ".admin-form__row input"), /width\s*:\s*100%/);

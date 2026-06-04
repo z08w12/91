@@ -79,6 +79,18 @@ func (c *Catalog) migrate(ctx context.Context) error {
 	if err := c.addColumnIfMissing(ctx, "drives", "skip_dir_ids", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
 		return err
 	}
+	if _, err := c.db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS deleted_videos (
+	id           TEXT PRIMARY KEY,
+	drive_id     TEXT NOT NULL DEFAULT '',
+	file_id      TEXT NOT NULL DEFAULT '',
+	content_hash TEXT NOT NULL DEFAULT '',
+	file_name    TEXT NOT NULL DEFAULT '',
+	size_bytes   INTEGER NOT NULL DEFAULT 0,
+	deleted_at   INTEGER NOT NULL
+)`); err != nil {
+		return err
+	}
 	if err := c.syncDriveScanRootIDToRootID(ctx); err != nil {
 		return err
 	}
@@ -119,6 +131,15 @@ func (c *Catalog) migrate(ctx context.Context) error {
 		return err
 	}
 	if _, err := c.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_videos_file_name_size_created ON videos(file_name, size_bytes, created_at, id)`); err != nil {
+		return err
+	}
+	if _, err := c.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_deleted_videos_drive_file ON deleted_videos(drive_id, file_id)`); err != nil {
+		return err
+	}
+	if _, err := c.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_deleted_videos_drive_hash ON deleted_videos(drive_id, content_hash)`); err != nil {
+		return err
+	}
+	if _, err := c.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_deleted_videos_drive_signature ON deleted_videos(drive_id, file_name, size_bytes)`); err != nil {
 		return err
 	}
 	if err := c.seedSystemTags(ctx); err != nil {

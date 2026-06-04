@@ -9,6 +9,8 @@ type ConfirmModalProps = {
   confirmText?: string;
   cancelText?: string;
   danger?: boolean;
+  centerMessage?: boolean;
+  modalClassName?: string;
   loading?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -22,6 +24,8 @@ export function ConfirmModal({
   confirmText = "确认",
   cancelText = "取消",
   danger = false,
+  centerMessage = false,
+  modalClassName = "",
   loading = false,
   onCancel,
   onConfirm,
@@ -31,6 +35,7 @@ export function ConfirmModal({
       open={open}
       title={title}
       onClose={onCancel}
+      className={modalClassName}
       footer={
         <>
           <button type="button" className="admin-btn" onClick={onCancel} disabled={loading}>
@@ -47,8 +52,8 @@ export function ConfirmModal({
         </>
       }
     >
-      <div className="admin-confirm">
-        <div className={`admin-confirm__icon${danger ? " is-danger" : ""}`}>
+      <div className={`admin-confirm${centerMessage ? " is-message-centered" : ""}`}>
+        <div className={`admin-confirm__icon${danger ? " is-danger" : ""}`} aria-hidden={centerMessage}>
           <AlertTriangle size={20} />
         </div>
         <div className="admin-confirm__content">

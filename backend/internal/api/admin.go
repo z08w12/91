@@ -53,6 +53,7 @@ type AdminServer struct {
 	OnRegenFailedPreviews      func(driveID string)
 	OnRegenFailedThumbnails    func(driveID string)
 	OnRegenFailedFingerprints  func(driveID string)
+	OnDeleteVideo              func(ctx context.Context, videoID string) (DeleteVideoResult, error)
 	GetDriveGenerationStatuses func() map[string]DriveGenerationStatuses
 	// OnTeaserEnabledChanged 在 per-drive 预览视频开关被切换后调用。
 	// enabled=true 时上层应该重新把 pending 预览视频入队（类似旧的全局开关从关到开）；
@@ -107,6 +108,11 @@ type NightlyJobStatus struct {
 	LastFinishedAt string `json:"lastFinishedAt,omitempty"`
 }
 
+type DeleteVideoResult struct {
+	OK            bool `json:"ok"`
+	DeletedSource bool `json:"deletedSource"`
+}
+
 func (a *AdminServer) Register(r chi.Router) {
 	r.Route("/admin/api", func(r chi.Router) {
 		// 登录、登出和首次部署初始化不需要鉴权
@@ -139,6 +145,7 @@ func (a *AdminServer) Register(r chi.Router) {
 			// 视频
 			r.Get("/videos", a.handleAdminListVideos)
 			r.Put("/videos/{id}", a.handleUpdateVideo)
+			r.Delete("/videos/{id}", a.handleDeleteVideo)
 			r.Post("/videos/regen-preview", a.handleRegenAllPreviews)
 			r.Post("/videos/{id}/regen-preview", a.handleRegenPreview)
 
@@ -1029,6 +1036,36 @@ func (a *AdminServer) handleUpdateVideo(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+
+func (a *AdminServer) handleDeleteVideo(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("invalid video id"))
+		return
+	}
+	var (
+		result DeleteVideoResult
+		err    error
+	)
+	if a.OnDeleteVideo != nil {
+		result, err = a.OnDeleteVideo(r.Context(), id)
+	} else {
+		err = a.Catalog.DeleteVideoWithTombstone(r.Context(), id)
+		result = DeleteVideoResult{OK: err == nil}
+	}
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeErr(w, http.StatusNotFound, err)
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !result.OK {
+		result.OK = true
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (a *AdminServer) handleRegenPreview(w http.ResponseWriter, r *http.Request) {

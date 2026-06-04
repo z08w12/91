@@ -943,6 +943,177 @@ func TestCleanupDriveVideosForDeleteRemovesRowsAndGeneratedAssetsOnly(t *testing
 	}
 }
 
+func TestDeleteVideoRemovesGeneratedAssetsKeepsLocalOriginalAndTombstones(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	localDir := filepath.Join(root, "previews")
+	originalDir := filepath.Join(root, "local-videos")
+	originalVideo := filepath.Join(originalDir, "clip.mp4")
+	if err := os.MkdirAll(originalDir, 0o755); err != nil {
+		t.Fatalf("mkdir original dir: %v", err)
+	}
+	if err := os.WriteFile(originalVideo, []byte("original"), 0o644); err != nil {
+		t.Fatalf("write original: %v", err)
+	}
+
+	cat, err := catalog.Open(filepath.Join(t.TempDir(), "catalog.db"))
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	t.Cleanup(func() { _ = cat.Close() })
+	if err := cat.UpsertDrive(ctx, &catalog.Drive{
+		ID:            "local-main",
+		Kind:          "localstorage",
+		Name:          "Local",
+		RootID:        "/",
+		Credentials:   map[string]string{"path": originalDir},
+		TeaserEnabled: true,
+	}); err != nil {
+		t.Fatalf("seed drive: %v", err)
+	}
+
+	previewPath := filepath.Join(localDir, "localstorage-local-main-file.mp4")
+	thumbPath := filepath.Join(localDir, "thumbs", "localstorage-local-main-file.jpg")
+	for _, path := range []string{previewPath, thumbPath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte("generated"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	now := time.Now()
+	if err := cat.UpsertVideo(ctx, &catalog.Video{
+		ID:                "localstorage-local-main-file",
+		DriveID:           "local-main",
+		FileID:            "file",
+		FileName:          "clip.mp4",
+		SampledSHA256:     "sampled",
+		FingerprintStatus: "ready",
+		Title:             "Local File",
+		PreviewLocal:      previewPath,
+		PreviewStatus:     "ready",
+		ThumbnailURL:      "/p/thumb/localstorage-local-main-file",
+		Size:              123,
+		PublishedAt:       now,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}); err != nil {
+		t.Fatalf("seed video: %v", err)
+	}
+
+	app := &App{
+		cfg: &config.Config{Storage: config.Storage{LocalPreviewDir: localDir}},
+		cat: cat,
+	}
+	result, err := app.deleteVideo(ctx, "localstorage-local-main-file")
+	if err != nil {
+		t.Fatalf("delete video: %v", err)
+	}
+	if !result.OK || result.DeletedSource {
+		t.Fatalf("delete result = %#v, want ok without source deletion", result)
+	}
+	if _, err := cat.GetVideo(ctx, "localstorage-local-main-file"); err != sql.ErrNoRows {
+		t.Fatalf("deleted video lookup error = %v, want sql.ErrNoRows", err)
+	}
+	deleted, err := cat.IsDeletedVideoCandidate(ctx, "localstorage-local-main-file", "local-main", "file", "", "clip.mp4", 123)
+	if err != nil {
+		t.Fatalf("check tombstone: %v", err)
+	}
+	if !deleted {
+		t.Fatal("deleted video tombstone missing")
+	}
+	for _, path := range []string{previewPath, thumbPath} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("generated asset %s still exists, stat err=%v", path, err)
+		}
+	}
+	if _, err := os.Stat(originalVideo); err != nil {
+		t.Fatalf("original local video was removed: %v", err)
+	}
+}
+
+func TestDeleteVideoRemovesSpider91SourceFile(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	localDir := filepath.Join(root, "previews")
+	cat, err := catalog.Open(filepath.Join(t.TempDir(), "catalog.db"))
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	t.Cleanup(func() { _ = cat.Close() })
+
+	if err := cat.UpsertDrive(ctx, &catalog.Drive{
+		ID:            "spider-main",
+		Kind:          spider91.Kind,
+		Name:          "Spider",
+		RootID:        "/",
+		TeaserEnabled: true,
+	}); err != nil {
+		t.Fatalf("seed drive: %v", err)
+	}
+	app := &App{
+		cfg: &config.Config{Storage: config.Storage{LocalPreviewDir: localDir}},
+		cat: cat,
+	}
+	sourceDir := app.spider91DriveDir("spider-main")
+	sourceVideo := filepath.Join(sourceDir, "videos", "source.mp4")
+	sourceThumb := filepath.Join(sourceDir, "thumbs", "source.jpg")
+	previewPath := filepath.Join(localDir, "spider91-spider-main-source.mp4")
+	commonThumb := filepath.Join(localDir, "thumbs", "spider91-spider-main-source.jpg")
+	for _, path := range []string{sourceVideo, sourceThumb, previewPath, commonThumb} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte("file"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	now := time.Now()
+	if err := cat.UpsertVideo(ctx, &catalog.Video{
+		ID:            "spider91-spider-main-source",
+		DriveID:       "spider-main",
+		FileID:        "source.mp4",
+		FileName:      "source.mp4",
+		Ext:           "mp4",
+		Title:         "Spider Source",
+		PreviewLocal:  previewPath,
+		PreviewStatus: "ready",
+		ThumbnailURL:  "/p/thumb/spider91-spider-main-source",
+		Size:          456,
+		PublishedAt:   now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatalf("seed video: %v", err)
+	}
+
+	result, err := app.deleteVideo(ctx, "spider91-spider-main-source")
+	if err != nil {
+		t.Fatalf("delete spider video: %v", err)
+	}
+	if !result.OK || !result.DeletedSource {
+		t.Fatalf("delete result = %#v, want source deleted", result)
+	}
+	for _, path := range []string{sourceVideo, sourceThumb, previewPath, commonThumb} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("deleted file %s still exists, stat err=%v", path, err)
+		}
+	}
+	if _, err := cat.GetVideo(ctx, "spider91-spider-main-source"); err != sql.ErrNoRows {
+		t.Fatalf("deleted video lookup error = %v, want sql.ErrNoRows", err)
+	}
+	deleted, err := cat.IsVideoDeleted(ctx, "spider91-spider-main-source")
+	if err != nil {
+		t.Fatalf("check tombstone: %v", err)
+	}
+	if !deleted {
+		t.Fatal("deleted spider91 video tombstone missing")
+	}
+}
+
 func TestCleanupDriveVideosForDeleteSpider91RemovesCrawledDirAndOriginRecords(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

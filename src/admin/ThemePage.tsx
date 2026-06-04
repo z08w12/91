@@ -103,9 +103,6 @@ export function ThemePage() {
     <div className="theme-page">
       <header className="theme-page__head">
         <h1 className="theme-page__title">主题外观</h1>
-        <p className="theme-page__sub">
-          切换全站主题。所有访客都会看到这里选定的主题，本设置会写入数据库永久保存。
-        </p>
       </header>
 
       <div className="theme-grid">

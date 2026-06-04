@@ -154,6 +154,14 @@ func (s *Scanner) walk(ctx context.Context, dirID, dirName string, stats *Stats,
 		stats.SeenFileIDs[e.ID] = struct{}{}
 
 		id := s.Drive.Kind() + "-" + s.Drive.ID() + "-" + e.ID
+		if deleted, err := s.Catalog.IsDeletedVideoCandidate(ctx, id, s.Drive.ID(), e.ID, e.Hash, e.Name, e.Size); err != nil {
+			stats.Errors++
+			log.Printf("[scanner] check deleted video %s error: %v", id, err)
+			continue
+		} else if deleted {
+			continue
+		}
+
 		parsed := Parse(e.Name)
 		if parsed.Title == "" {
 			parsed.Title = strings.TrimSuffix(e.Name, ext)

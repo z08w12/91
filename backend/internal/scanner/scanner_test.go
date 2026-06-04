@@ -90,6 +90,61 @@ func TestRunIgnoresZeroSizeVideoFiles(t *testing.T) {
 	}
 }
 
+func TestRunSkipsAdminDeletedVideo(t *testing.T) {
+	ctx := context.Background()
+	cat, err := catalog.Open(t.TempDir() + "/catalog.db")
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := cat.Close(); err != nil {
+			t.Fatalf("close catalog: %v", err)
+		}
+	})
+
+	now := time.Now()
+	if err := cat.UpsertVideo(ctx, &catalog.Video{
+		ID:          "fake-drive-file-1",
+		DriveID:     "drive",
+		FileID:      "file-1",
+		FileName:    "clip.mp4",
+		ContentHash: "HASH-1",
+		Title:       "Deleted Clip",
+		Size:        123,
+		PublishedAt: now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("seed video: %v", err)
+	}
+	if err := cat.DeleteVideoWithTombstone(ctx, "fake-drive-file-1"); err != nil {
+		t.Fatalf("delete with tombstone: %v", err)
+	}
+
+	drv := &scannerFakeDrive{
+		entries: []drives.Entry{{
+			ID:       "file-1",
+			Name:     "clip.mp4",
+			Size:     123,
+			Hash:     "hash-1",
+			MimeType: "video/mp4",
+			ModTime:  now,
+		}},
+	}
+	sc := New(cat, drv, []string{".mp4"}, nil, nil)
+
+	stats, err := sc.Run(ctx, "")
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if stats.Added != 0 {
+		t.Fatalf("added = %d, want 0", stats.Added)
+	}
+	if _, err := cat.GetVideo(ctx, "fake-drive-file-1"); err != sql.ErrNoRows {
+		t.Fatalf("deleted video was recreated, get error = %v", err)
+	}
+}
+
 func TestRunDoesNotBackfillRemoteThumbnailForExistingVideo(t *testing.T) {
 	ctx := context.Background()
 	cat, err := catalog.Open(t.TempDir() + "/catalog.db")

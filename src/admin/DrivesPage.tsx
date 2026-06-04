@@ -650,6 +650,8 @@ export function DrivesPage() {
           message="当前网盘配置有未保存的更改，确定要放弃吗？"
           confirmText="放弃更改"
           danger
+          centerMessage
+          modalClassName="admin-modal--delete-confirm"
           onCancel={() => setDiscardConfirmOpen(false)}
           onConfirm={discardDriveChanges}
         />
@@ -787,6 +789,8 @@ export function DrivesPage() {
         message="当前网盘配置有未保存的更改，确定要放弃吗？"
         confirmText="放弃更改"
         danger
+        centerMessage
+        modalClassName="admin-modal--delete-confirm"
         onCancel={() => setDiscardConfirmOpen(false)}
         onConfirm={discardDriveChanges}
       />

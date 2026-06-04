@@ -1362,12 +1362,19 @@ func (w *ThumbWorker) Run(ctx context.Context) {
 
 func (w *Worker) processQueued(ctx context.Context, v *catalog.Video) {
 	defer w.queue.release(v)
-	w.activity.start(v)
+	if w.Catalog == nil || v == nil || v.ID == "" {
+		return
+	}
+	current, err := w.Catalog.GetVideo(ctx, v.ID)
+	if err != nil || current.Hidden {
+		return
+	}
+	w.activity.start(current)
 	defer w.activity.done()
 	if !waitForRateLimitCooldown(ctx, &w.rateLimit, "preview", w.Drive) {
 		return
 	}
-	w.process(ctx, v)
+	w.process(ctx, current)
 }
 
 func (w *ThumbWorker) processQueued(ctx context.Context, v *catalog.Video) {
@@ -1562,18 +1569,22 @@ func (w *ThumbWorker) process(ctx context.Context, v *catalog.Video) bool {
 	if w.skipIfRateLimited(v) {
 		return false
 	}
+	if w.Catalog == nil || v == nil || v.ID == "" {
+		return false
+	}
 	queued := v
-	current := v
-	if loaded, err := w.Catalog.GetVideo(ctx, v.ID); err == nil {
-		if loaded.PreviewLocal == "" {
-			loaded.PreviewLocal = queued.PreviewLocal
-		}
-		current = loaded
-		v = loaded
-		if loaded.ThumbnailURL != "" && loaded.DurationSeconds > 0 {
-			_ = w.Catalog.UpdateVideoMeta(ctx, v.ID, catalog.VideoMetaPatch{ThumbnailStatus: "ready"})
-			return false
-		}
+	loaded, err := w.Catalog.GetVideo(ctx, v.ID)
+	if err != nil || loaded.Hidden {
+		return false
+	}
+	if loaded.PreviewLocal == "" {
+		loaded.PreviewLocal = queued.PreviewLocal
+	}
+	current := loaded
+	v = loaded
+	if loaded.ThumbnailURL != "" && loaded.DurationSeconds > 0 {
+		_ = w.Catalog.UpdateVideoMeta(ctx, v.ID, catalog.VideoMetaPatch{ThumbnailStatus: "ready"})
+		return false
 	}
 	if current.ThumbnailURL != "" {
 		durationBackfillFailed := false
@@ -1670,13 +1681,18 @@ func (w *ThumbWorker) probeDuration(ctx context.Context, v *catalog.Video, link 
 }
 
 func (w *ThumbWorker) generateThumbnailFromLink(ctx context.Context, v *catalog.Video, link *drives.StreamLink) error {
-	if _, err := w.Gen.GenerateThumbnail(ctx, link, v.ID, float64(v.DurationSeconds)); err != nil {
+	local, err := w.Gen.GenerateThumbnail(ctx, link, v.ID, float64(v.DurationSeconds))
+	if err != nil {
 		return err
 	}
-	_ = w.Catalog.UpdateVideoMeta(ctx, v.ID, catalog.VideoMetaPatch{
+	if err := w.Catalog.UpdateVideoMeta(ctx, v.ID, catalog.VideoMetaPatch{
 		ThumbnailURL:    "/p/thumb/" + v.ID,
 		ThumbnailStatus: "ready",
-	})
+	}); err != nil {
+		_ = os.Remove(local)
+		log.Printf("[thumb] update %s after generate: %v", v.Title, err)
+		return nil
+	}
 	log.Printf("[thumb] ready %s", v.Title)
 	return nil
 }
@@ -1751,7 +1767,11 @@ func (w *Worker) process(ctx context.Context, v *catalog.Video) {
 	}
 
 	removePreviousLocalTeaser(v.PreviewLocal, local)
-	w.Catalog.UpdatePreview(ctx, v.ID, local, "ready")
+	if err := w.Catalog.UpdatePreview(ctx, v.ID, local, "ready"); err != nil {
+		removePreviousLocalTeaser(local, "")
+		log.Printf("[preview] update %s after generate: %v", v.Title, err)
+		return
+	}
 	log.Printf("[preview] ready %s (duration=%.1fs)", v.Title, duration)
 }
 

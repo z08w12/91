@@ -331,6 +331,16 @@ func (c *Crawler) RunOnce(ctx context.Context, targetNew int) (*CrawlResult, err
 			break
 		}
 		videoID := buildVideoID(c.cfg.Driver.ID(), sourceID)
+		deleted, err := c.cfg.Catalog.IsVideoDeleted(ctx, videoID)
+		if err != nil {
+			log.Printf("[spider91] drive=%s viewkey=%s source_id=%s check deleted: %v", c.cfg.Driver.ID(), item.Viewkey, sourceID, err)
+			result.Failed++
+			continue
+		}
+		if deleted {
+			result.Skipped++
+			continue
+		}
 		if existing, _ := c.cfg.Catalog.GetVideo(ctx, videoID); existing != nil {
 			result.Skipped++
 			continue

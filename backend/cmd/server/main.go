@@ -202,6 +202,9 @@ func main() {
 		OnRegenFailedFingerprints: func(driveID string) {
 			go app.regenFailedFingerprints(ctx, driveID)
 		},
+		OnDeleteVideo: func(reqCtx context.Context, videoID string) (api.DeleteVideoResult, error) {
+			return app.deleteVideo(reqCtx, videoID)
+		},
 		GetDriveGenerationStatuses: func() map[string]api.DriveGenerationStatuses {
 			return app.driveGenerationStatuses()
 		},
@@ -1497,6 +1500,148 @@ func (a *App) cleanupMissingDriveVideos(ctx context.Context, driveID string, liv
 		removed++
 	}
 	return removed, nil
+}
+
+func (a *App) deleteVideo(ctx context.Context, videoID string) (api.DeleteVideoResult, error) {
+	if a == nil || a.cat == nil {
+		return api.DeleteVideoResult{}, sql.ErrNoRows
+	}
+	v, err := a.cat.GetVideo(ctx, videoID)
+	if err != nil {
+		return api.DeleteVideoResult{}, err
+	}
+
+	localDir := ""
+	if a.cfg != nil {
+		localDir = a.cfg.Storage.LocalPreviewDir
+	}
+	if err := removeLocalVideoAssets(localDir, v); err != nil {
+		return api.DeleteVideoResult{}, fmt.Errorf("remove local assets for %s: %w", v.ID, err)
+	}
+	deletedSource, err := a.removeSpider91SourceFile(ctx, v)
+	if err != nil {
+		return api.DeleteVideoResult{}, err
+	}
+	if err := a.cat.DeleteVideoWithTombstone(ctx, v.ID); err != nil {
+		return api.DeleteVideoResult{}, err
+	}
+	return api.DeleteVideoResult{OK: true, DeletedSource: deletedSource}, nil
+}
+
+func (a *App) removeSpider91SourceFile(ctx context.Context, v *catalog.Video) (bool, error) {
+	if a == nil || a.cfg == nil || v == nil || !strings.HasPrefix(v.ID, "spider91-") {
+		return false, nil
+	}
+	driveID, sourceID := a.spider91OriginFromVideo(ctx, v)
+	if driveID == "" || sourceID == "" {
+		return false, nil
+	}
+	src := spider91.New(spider91.Config{
+		ID:      driveID,
+		RootDir: a.spider91DriveDir(driveID),
+	})
+	deleted := false
+	for _, fileID := range spider91SourceFileCandidates(v, driveID, sourceID) {
+		videoPath, err := src.VideoPath(fileID)
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(videoPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return deleted, fmt.Errorf("stat spider91 source %s: %w", videoPath, err)
+		}
+		if info.IsDir() {
+			continue
+		}
+		if err := os.Remove(videoPath); err != nil && !os.IsNotExist(err) {
+			return deleted, fmt.Errorf("remove spider91 source %s: %w", videoPath, err)
+		}
+		deleted = true
+		removeSpider91ThumbCandidates(src, strings.TrimSuffix(fileID, filepath.Ext(fileID)))
+	}
+	if !deleted {
+		removeSpider91ThumbCandidates(src, sourceID)
+	}
+	return deleted, nil
+}
+
+func (a *App) spider91OriginFromVideo(ctx context.Context, v *catalog.Video) (string, string) {
+	if a == nil || v == nil {
+		return "", ""
+	}
+	if d, err := a.cat.GetDrive(ctx, v.DriveID); err == nil && d != nil && d.Kind == spider91.Kind {
+		prefix := "spider91-" + d.ID + "-"
+		if strings.HasPrefix(v.ID, prefix) {
+			return d.ID, strings.TrimPrefix(v.ID, prefix)
+		}
+	}
+	drives, err := a.cat.ListDrives(ctx)
+	if err != nil {
+		return "", ""
+	}
+	bestDriveID := ""
+	bestSourceID := ""
+	for _, d := range drives {
+		if d == nil || d.Kind != spider91.Kind {
+			continue
+		}
+		prefix := "spider91-" + d.ID + "-"
+		if !strings.HasPrefix(v.ID, prefix) {
+			continue
+		}
+		if len(d.ID) > len(bestDriveID) {
+			bestDriveID = d.ID
+			bestSourceID = strings.TrimPrefix(v.ID, prefix)
+		}
+	}
+	return bestDriveID, bestSourceID
+}
+
+func spider91SourceFileCandidates(v *catalog.Video, originDriveID, sourceID string) []string {
+	candidates := []string{}
+	if v != nil && v.DriveID == originDriveID && strings.TrimSpace(v.FileID) != "" {
+		candidates = append(candidates, strings.TrimSpace(v.FileID))
+	}
+	if ext := strings.Trim(strings.TrimSpace(v.Ext), "."); ext != "" {
+		candidates = append(candidates, sourceID+"."+ext)
+	}
+	for _, ext := range []string{".mp4", ".mkv", ".mov", ".webm", ".avi"} {
+		candidates = append(candidates, sourceID+ext)
+	}
+	seen := make(map[string]struct{}, len(candidates))
+	out := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func removeSpider91ThumbCandidates(src *spider91.Driver, stem string) {
+	if src == nil {
+		return
+	}
+	stem = strings.TrimSpace(stem)
+	if stem == "" {
+		return
+	}
+	for _, ext := range []string{".jpg", ".jpeg", ".png", ".webp"} {
+		thumbPath, err := src.ThumbPath(stem + ext)
+		if err != nil {
+			continue
+		}
+		_ = os.Remove(thumbPath)
+	}
 }
 
 func (a *App) cleanupDriveVideosForDelete(ctx context.Context, driveID string) (int, error) {

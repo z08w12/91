@@ -179,6 +179,20 @@ test("drive detail selection is stored in the URL history", () => {
   assert.doesNotMatch(drivesPageSource, /setSelectedDriveId/);
 });
 
+test("drive discard confirmation matches delete confirmation modal styling", () => {
+  const discardModals = Array.from(
+    drivesPageSource.matchAll(/<ConfirmModal[\s\S]*?title="放弃未保存更改"[\s\S]*?\/>/g),
+    (match) => match[0]
+  );
+
+  assert.equal(discardModals.length, 2);
+  for (const modal of discardModals) {
+    assert.match(modal, /danger/);
+    assert.match(modal, /centerMessage/);
+    assert.match(modal, /modalClassName="admin-modal--delete-confirm"/);
+  }
+});
+
 test("drive generation actions can resume pending work after stop", () => {
   assert.match(driveComponentsSource, /thumbnailPendingCount/);
   assert.match(driveComponentsSource, /teaserPendingCount/);

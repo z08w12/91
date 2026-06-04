@@ -70,6 +70,25 @@ CREATE TABLE IF NOT EXISTS deleted_tags (
     deleted_at INTEGER NOT NULL
 );
 
+-- 管理员显式删除过的视频。用于防止后续扫描 / spider91 爬虫把同一个源文件
+-- 再次入库；不代表原始云盘文件已被删除。
+CREATE TABLE IF NOT EXISTS deleted_videos (
+    id           TEXT PRIMARY KEY,
+    drive_id     TEXT NOT NULL DEFAULT '',
+    file_id      TEXT NOT NULL DEFAULT '',
+    content_hash TEXT NOT NULL DEFAULT '',
+    file_name    TEXT NOT NULL DEFAULT '',
+    size_bytes   INTEGER NOT NULL DEFAULT 0,
+    deleted_at   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_deleted_videos_drive_file
+    ON deleted_videos(drive_id, file_id);
+CREATE INDEX IF NOT EXISTS idx_deleted_videos_drive_hash
+    ON deleted_videos(drive_id, content_hash);
+CREATE INDEX IF NOT EXISTS idx_deleted_videos_drive_signature
+    ON deleted_videos(drive_id, file_name, size_bytes);
+
 -- 网盘账户
 CREATE TABLE IF NOT EXISTS drives (
     id            TEXT PRIMARY KEY,

@@ -890,48 +890,64 @@
   background: var(--bg-elevated);
 }
 
-.admin-delete-confirm {
-  display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
-  gap: var(--space-3);
-  align-items: start;
-}
-
-.admin-delete-confirm__icon {
-  width: 42px;
-  height: 42px;
-  border-radius: var(--radius-sm);
-  display: grid;
-  place-items: center;
-  color: var(--danger);
-  background: var(--danger-soft);
-  border: 1px solid rgba(241, 85, 108, 0.34);
-}
-
-.admin-delete-confirm__content {
-  min-width: 0;
-}
-
-.admin-delete-confirm__title {
-  margin: 0 0 8px;
+.admin-modal--delete-confirm {
+  background: var(--bg-surface);
+  border-color: var(--border-default);
   color: var(--text-strong);
-  font-size: var(--font-md);
-  font-weight: var(--weight-semibold);
+  box-shadow: var(--shadow-xl);
 }
 
-.admin-delete-confirm__text {
-  margin: 0 0 10px;
-  color: var(--text-muted);
-  font-size: var(--font-sm);
-  line-height: 1.6;
+.admin-modal--delete-confirm .admin-modal__header,
+.admin-modal--delete-confirm .admin-modal__footer {
+  background: var(--bg-elevated);
+  border-color: var(--border-subtle);
 }
 
-.admin-delete-confirm__list {
-  margin: 0 0 10px;
-  padding-left: 18px;
-  color: var(--text-default);
-  font-size: var(--font-sm);
-  line-height: 1.7;
+.admin-modal--delete-confirm .admin-modal__header,
+.admin-modal--delete-confirm .admin-confirm__message {
+  color: var(--text-strong);
+}
+
+.admin-modal--delete-confirm .admin-modal__header .admin-btn {
+  background: var(--bg-elevated);
+  color: var(--accent);
+  border-color: var(--border-default);
+}
+
+.admin-modal--delete-confirm .admin-modal__header .admin-btn:hover:not(:disabled) {
+  background: var(--bg-surface);
+  color: var(--accent-hover);
+  border-color: var(--border-strong);
+}
+
+:root[data-theme="pink"] .admin-modal--delete-confirm {
+  background: #ffffff;
+  border-color: rgba(255, 91, 138, 0.18);
+  color: #2a1820;
+  box-shadow: 0 18px 54px rgba(42, 24, 32, 0.18);
+}
+
+:root[data-theme="pink"] .admin-modal--delete-confirm .admin-modal__header,
+:root[data-theme="pink"] .admin-modal--delete-confirm .admin-modal__footer {
+  background: #ffffff;
+  border-color: rgba(255, 91, 138, 0.12);
+}
+
+:root[data-theme="pink"] .admin-modal--delete-confirm .admin-modal__header,
+:root[data-theme="pink"] .admin-modal--delete-confirm .admin-confirm__message {
+  color: #2a1820;
+}
+
+:root[data-theme="pink"] .admin-modal--delete-confirm .admin-modal__header .admin-btn {
+  background: #ffffff;
+  color: #ff5b8a;
+  border-color: rgba(255, 91, 138, 0.26);
+}
+
+:root[data-theme="pink"] .admin-modal--delete-confirm .admin-modal__header .admin-btn:hover:not(:disabled) {
+  background: #fff6f9;
+  color: #f43d75;
+  border-color: rgba(255, 91, 138, 0.45);
 }
 
 .admin-confirm {
@@ -960,6 +976,19 @@
 
 .admin-confirm__content {
   min-width: 0;
+}
+
+.admin-confirm.is-message-centered {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.admin-confirm.is-message-centered .admin-confirm__icon {
+  display: none;
+}
+
+.admin-confirm.is-message-centered .admin-confirm__message {
+  margin-bottom: 0;
+  text-align: left;
 }
 
 .admin-confirm__message {
@@ -1596,6 +1625,11 @@
     max-height: calc(100vh - 16px);
   }
 
+  .admin-modal--delete-confirm {
+    align-self: center;
+    justify-self: center;
+  }
+
   .admin-modal__header,
   .admin-modal__body,
   .admin-modal__footer {
@@ -1648,6 +1682,298 @@
   font-size: var(--font-xs);
 }
 
+.admin-video-filemeta-pills {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .admin-videos-table:not(.admin-drives-table) tbody {
+    gap: 10px;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) tr {
+    --admin-video-card-bg: var(--bg-surface);
+    --admin-video-card-border: var(--border-default);
+    --admin-video-card-line: var(--border-subtle);
+    --admin-video-card-shadow: var(--shadow-sm);
+    --admin-video-card-selected-shadow: 0 0 0 1px var(--border-accent), var(--shadow-md);
+    --admin-video-card-main: var(--text-strong);
+    --admin-video-card-text: var(--text-default);
+    --admin-video-card-muted: var(--text-muted);
+    --admin-video-card-faint: var(--text-faint);
+    --admin-video-card-pill-bg: var(--bg-elevated);
+    --admin-video-card-pill-border: var(--border-subtle);
+    --admin-video-card-pill-text: var(--text-muted);
+    --admin-video-card-category-bg: var(--accent-soft);
+    --admin-video-card-category-border: var(--border-accent);
+    --admin-video-card-category-text: var(--accent);
+    --admin-video-card-button-bg: var(--bg-elevated);
+    --admin-video-card-button-hover-bg: var(--bg-surface);
+    --admin-video-card-button-text: var(--text-default);
+    --admin-video-card-danger: var(--danger);
+    --admin-video-card-danger-border: rgba(241, 85, 108, 0.4);
+    position: relative;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0;
+    padding: 12px 14px;
+    background: var(--admin-video-card-bg);
+    border: 1px solid var(--admin-video-card-border);
+    border-radius: 14px;
+    box-shadow: var(--admin-video-card-shadow);
+    color: var(--admin-video-card-text);
+  }
+
+  :root:not([data-theme="pink"]) .admin-videos-table:not(.admin-drives-table) tr {
+    --admin-video-card-bg: #1e1e1e;
+    --admin-video-card-border: rgba(255, 255, 255, 0.06);
+    --admin-video-card-line: rgba(255, 255, 255, 0.08);
+    --admin-video-card-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+    --admin-video-card-selected-shadow:
+      0 0 0 1px rgba(255, 138, 60, 0.28),
+      0 8px 20px rgba(0, 0, 0, 0.24);
+    --admin-video-card-main: #f0f0f0;
+    --admin-video-card-text: #e0e0e0;
+    --admin-video-card-muted: rgba(255, 255, 255, 0.62);
+    --admin-video-card-faint: rgba(255, 255, 255, 0.3);
+    --admin-video-card-pill-bg: rgba(255, 255, 255, 0.06);
+    --admin-video-card-pill-border: rgba(255, 255, 255, 0.05);
+    --admin-video-card-pill-text: rgba(255, 255, 255, 0.62);
+    --admin-video-card-category-bg: rgba(255, 255, 255, 0.11);
+    --admin-video-card-category-border: rgba(255, 255, 255, 0.14);
+    --admin-video-card-category-text: #f0f0f0;
+    --admin-video-card-button-bg: rgba(255, 255, 255, 0.06);
+    --admin-video-card-button-hover-bg: rgba(255, 255, 255, 0.1);
+    --admin-video-card-button-text: #e0e0e0;
+    --admin-video-card-danger: #f08080;
+    --admin-video-card-danger-border: rgba(240, 80, 80, 0.4);
+  }
+
+  :root[data-theme="pink"] .admin-videos-table:not(.admin-drives-table) tr {
+    --admin-video-card-danger-border: rgba(228, 59, 92, 0.36);
+  }
+
+  .admin-videos-table:not(.admin-drives-table) tr.is-selected {
+    background: var(--admin-video-card-bg);
+    border-color: var(--border-accent);
+    box-shadow: var(--admin-video-card-selected-shadow);
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td {
+    gap: 3px;
+    color: var(--admin-video-card-text);
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td::before {
+    color: var(--admin-video-card-faint);
+    font-size: 10px;
+    font-weight: var(--weight-semibold);
+    letter-spacing: 0.06em;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td.is-checkbox {
+    position: absolute;
+    top: 12px;
+    left: 14px;
+    z-index: 1;
+    display: flex;
+    width: 28px;
+    height: 28px;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td.is-checkbox::before,
+  .admin-videos-table:not(.admin-drives-table) td[data-label="标题"]::before {
+    content: none;
+    display: none;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) .admin-table-checkbox-btn {
+    border-radius: 8px;
+    color: var(--admin-video-card-muted);
+  }
+
+  .admin-videos-table:not(.admin-drives-table) .admin-table-checkbox-btn:hover,
+  .admin-videos-table:not(.admin-drives-table) .admin-table-checkbox-btn:focus-visible {
+    background: var(--admin-video-card-button-hover-bg);
+    color: var(--admin-video-card-main);
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td[data-label="标题"] {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    min-height: 28px;
+    padding-left: 36px;
+    gap: 6px;
+    align-content: center;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) .admin-video-title {
+    color: var(--admin-video-card-main);
+    font-size: 14px;
+    font-weight: var(--weight-bold);
+    line-height: 1.35;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) .admin-video-filemeta {
+    display: none;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) .admin-video-filemeta-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) .admin-video-filemeta-pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 19px;
+    padding: 2px 7px;
+    border: 1px solid var(--admin-video-card-pill-border);
+    border-radius: var(--radius-pill);
+    background: var(--admin-video-card-pill-bg);
+    color: var(--admin-video-card-pill-text);
+    font-size: 10px;
+    font-weight: var(--weight-semibold);
+    line-height: 1;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) .admin-video-filemeta-pill.is-category {
+    border-color: var(--admin-video-card-category-border);
+    background: var(--admin-video-card-category-bg);
+    color: var(--admin-video-card-category-text);
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td[data-label="标签"] {
+    display: none;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td[data-label="作者"],
+  .admin-videos-table:not(.admin-drives-table) td[data-label="来源"],
+  .admin-videos-table:not(.admin-drives-table) td[data-label="时长"],
+  .admin-videos-table:not(.admin-drives-table) td[data-label="预览视频"] {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--admin-video-card-line);
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td[data-label="作者"],
+  .admin-videos-table:not(.admin-drives-table) td[data-label="时长"] {
+    grid-column: 1;
+    padding-right: 12px;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td[data-label="来源"],
+  .admin-videos-table:not(.admin-drives-table) td[data-label="预览视频"] {
+    grid-column: 2;
+    padding-left: 12px;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td[data-label="作者"],
+  .admin-videos-table:not(.admin-drives-table) td[data-label="来源"] {
+    grid-row: 2;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td[data-label="时长"],
+  .admin-videos-table:not(.admin-drives-table) td[data-label="预览视频"] {
+    grid-row: 3;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) .admin-mono-cell {
+    color: var(--admin-video-card-text);
+    font-family: inherit;
+    font-size: 12px;
+    word-break: break-word;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) .admin-text-faint {
+    color: var(--admin-video-card-faint);
+  }
+
+  .admin-videos-table:not(.admin-drives-table) .admin-status {
+    width: max-content;
+    min-height: 22px;
+    padding: 3px 8px;
+    border-radius: var(--radius-pill);
+    font-size: 11px;
+    line-height: 1;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) .admin-status.is-ok {
+    background: var(--success-soft);
+    color: var(--success);
+  }
+
+  :root:not([data-theme="pink"]) .admin-videos-table:not(.admin-drives-table) .admin-status.is-ok {
+    background: rgba(110, 231, 183, 0.12);
+    color: #6ee7b7;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td.is-actions {
+    grid-column: 1 / -1;
+    grid-row: 4;
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--admin-video-card-line);
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td.is-actions::before {
+    flex: 0 0 auto;
+    margin-right: auto;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td.is-actions .admin-btn {
+    min-width: 28px;
+    height: 28px;
+    min-height: 28px;
+    padding: 0 9px;
+    border-color: transparent;
+    border-radius: 8px;
+    background: var(--admin-video-card-button-bg);
+    box-shadow: none;
+    color: var(--admin-video-card-button-text);
+    font-size: 12px;
+    gap: 5px;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td.is-actions .admin-btn + .admin-btn {
+    margin-left: 0;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td.is-actions .admin-btn:not(:first-of-type) {
+    width: 28px;
+    padding: 0;
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td.is-actions .admin-btn:hover:not(:disabled) {
+    background: var(--admin-video-card-button-hover-bg);
+    border-color: transparent;
+    box-shadow: none;
+    color: var(--admin-video-card-main);
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td.is-actions .admin-btn.is-danger {
+    border-color: var(--admin-video-card-danger-border);
+    background: transparent;
+    color: var(--admin-video-card-danger);
+  }
+
+  .admin-videos-table:not(.admin-drives-table) td.is-actions .admin-btn.is-danger:hover:not(:disabled) {
+    border-color: var(--admin-video-card-danger);
+    background: var(--danger-soft);
+    color: var(--admin-video-card-danger);
+  }
+}
+
 .admin-loading-screen {
   min-height: 100vh;
   display: grid;
@@ -1672,22 +1998,48 @@
   flex-wrap: wrap;
 }
 
-.admin-videos-filter__select {
-  height: 38px;
+.admin-videos-filter__select-wrap {
+  position: relative;
+  display: inline-flex;
   min-width: 200px;
-  padding: 0 var(--space-3);
+}
+
+.admin-videos-filter__select {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 38px;
+  padding: 0 36px 0 var(--space-3);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
   background: var(--bg-sunken);
   color: var(--text-strong);
   font-size: var(--font-sm);
+  line-height: 38px;
   cursor: pointer;
+}
+
+.admin-videos-filter__select::-ms-expand {
+  display: none;
 }
 
 .admin-videos-filter__select:focus {
   outline: none;
   border-color: var(--border-accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.admin-videos-filter__select-icon {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.admin-videos-filter__select:focus + .admin-videos-filter__select-icon {
+  color: var(--accent);
 }
 
 .admin-videos-filter__select option {
@@ -1758,6 +2110,35 @@
   white-space: nowrap;
 }
 
+.admin-videos-bulk-actions__btn {
+  box-shadow: none;
+}
+
+.admin-videos-bulk-actions__btn.is-primary {
+  box-shadow: 0 2px 10px var(--accent-glow);
+}
+
+.admin-videos-bulk-actions__btn.is-primary:hover:not(:disabled) {
+  box-shadow: 0 3px 12px var(--accent-glow);
+}
+
+.admin-videos-bulk-actions__btn.is-danger {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.admin-videos-bulk-actions__btn.is-danger:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #ffffff;
+  box-shadow: 0 3px 12px var(--danger-soft);
+}
+
+.admin-videos-bulk-actions__btn.is-danger:focus-visible {
+  outline-color: var(--danger);
+}
+
 .admin-table-pagination {
   display: flex;
   flex-wrap: wrap;
@@ -1790,7 +2171,7 @@
 }
 
 @media (max-width: 768px) {
-  .admin-videos-filter__select,
+  .admin-videos-filter__select-wrap,
   .admin-videos-filter__search {
     flex: 1 1 100%;
     min-width: 0;
@@ -2971,4 +3352,6 @@
 @media (hover: hover) and (pointer: fine) {
   .admin-table tbody tr:hover td { background: var(--bg-elevated) !important; }
 }
-.admin-table tr.is-selected td { background: var(--accent-softer) !important; }
+@media (min-width: 769px) {
+  .admin-table tr.is-selected td { background: var(--accent-softer) !important; }
+}

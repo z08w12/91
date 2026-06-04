@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"database/sql"
 	"sort"
 	"testing"
 	"time"
@@ -124,5 +125,52 @@ func TestListSpider91ViewkeysFindsMigratedVideos(t *testing.T) {
 	}
 	if len(other) != 0 {
 		t.Fatalf("non-existent drive: got %v, want empty", other)
+	}
+}
+
+func TestDeleteVideoWithTombstonePreventsReimport(t *testing.T) {
+	ctx := context.Background()
+	cat, err := Open(t.TempDir() + "/catalog.db")
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	t.Cleanup(func() { _ = cat.Close() })
+
+	now := time.Now()
+	if err := cat.UpsertVideo(ctx, &Video{
+		ID:            "spider91-91Spider-vk004",
+		DriveID:       "91Spider",
+		FileID:        "vk004.mp4",
+		FileName:      "vk004.mp4",
+		ContentHash:   "ABCDEF",
+		Title:         "Deleted Spider",
+		Size:          2048,
+		PreviewStatus: "ready",
+		PublishedAt:   now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	if err := cat.DeleteVideoWithTombstone(ctx, "spider91-91Spider-vk004"); err != nil {
+		t.Fatalf("delete with tombstone: %v", err)
+	}
+	if _, err := cat.GetVideo(ctx, "spider91-91Spider-vk004"); err != sql.ErrNoRows {
+		t.Fatalf("get deleted video error = %v, want sql.ErrNoRows", err)
+	}
+	deleted, err := cat.IsDeletedVideoCandidate(ctx, "spider91-91Spider-vk004", "91Spider", "vk004.mp4", "abcdef", "vk004.mp4", 2048)
+	if err != nil {
+		t.Fatalf("check deleted candidate: %v", err)
+	}
+	if !deleted {
+		t.Fatal("deleted candidate was not recognized")
+	}
+	viewkeys, err := cat.ListSpider91Viewkeys(ctx, "91Spider")
+	if err != nil {
+		t.Fatalf("ListSpider91Viewkeys: %v", err)
+	}
+	if len(viewkeys) != 1 || viewkeys[0] != "vk004" {
+		t.Fatalf("viewkeys = %#v, want [vk004]", viewkeys)
 	}
 }
