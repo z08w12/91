@@ -334,8 +334,8 @@ EOF
 }
 
 open_firewall_port() {
-  [[ "$CONFIGURE_UFW" == "1" ]] || return
-  command -v ufw >/dev/null 2>&1 || return
+  [[ "$CONFIGURE_UFW" == "1" ]] || return 0
+  command -v ufw >/dev/null 2>&1 || return 0
   if ufw status 2>/dev/null | grep -qi "Status: active"; then
     log "UFW is active; allowing ${FRONTEND_PORT}/tcp"
     ufw allow "${FRONTEND_PORT}/tcp"
@@ -378,7 +378,9 @@ install_or_update() {
   open_firewall_port
   restart_services
   show_status
-  [[ "$mode" == "install" ]] && show_summary
+  if [[ "$mode" == "install" ]]; then
+    show_summary
+  fi
 }
 
 uninstall_services() {
