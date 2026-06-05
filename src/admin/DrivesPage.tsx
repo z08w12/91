@@ -70,7 +70,9 @@ export function DrivesPage() {
   const nightlyBusy = scanningAll || nightlyStatus.running || nightlyStatus.queued;
   const nameMissing = form.name.trim().length === 0;
   const nameError = nameTouched && nameMissing ? "请填写网盘名称" : "";
-  const formDirty = !sameForm(form, initialForm);
+  const formDirty = form.id
+    ? !sameForm(form, initialForm)
+    : hasCreateFormChanges(form, initialForm);
 
   const uploadTargets = useMemo(
     () => list.filter((d) => d.kind === "pikpak" || d.kind === "p115" || d.kind === "p123" || d.kind === "onedrive"),
@@ -205,6 +207,13 @@ export function DrivesPage() {
     setModalOpen(false);
     setForm(initialForm);
     setNameTouched(false);
+  }
+
+  function handleCreateFormChange(nextForm: FormState) {
+    setForm(nextForm);
+    if (!nextForm.id && !hasCreateFormChanges(nextForm, initialForm)) {
+      setInitialForm(nextForm);
+    }
   }
 
   async function handleSave() {
@@ -753,7 +762,7 @@ export function DrivesPage() {
       >
         <DriveForm
           form={form}
-          onChange={setForm}
+          onChange={handleCreateFormChange}
           isEdit={!!list.find((x) => x.id === form.id)}
           uploadTargets={uploadTargets}
           nameError={nameError}
@@ -803,4 +812,11 @@ function sameRecord(a: Record<string, string>, b: Record<string, string>): boole
     if ((a[key] ?? "") !== (b[key] ?? "")) return false;
   }
   return true;
+}
+
+function hasCreateFormChanges(form: FormState, initial: FormState): boolean {
+  if (form.name.trim() !== "") return true;
+  if (form.rootId.trim() !== "") return true;
+  if (form.spider91UploadDriveId !== initial.spider91UploadDriveId) return true;
+  return Object.values(form.creds).some((value) => value.trim() !== "");
 }

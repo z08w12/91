@@ -1535,7 +1535,6 @@ func driveErrorShouldCooldown(d drives.Drive, err error) bool {
 			strings.Contains(text, "too many requests") ||
 			strings.Contains(text, "rate limit") ||
 			strings.Contains(text, "blocked") ||
-			strings.Contains(text, "moov atom not found") ||
 			strings.Contains(text, "partial file") ||
 			strings.Contains(text, "service unavailable")
 	case "p123":

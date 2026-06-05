@@ -210,6 +210,31 @@ test("drive discard confirmation matches delete confirmation modal styling", () 
   }
 });
 
+test("new drive type selection alone is not treated as unsaved config", () => {
+  assert.match(
+    drivesPageSource,
+    /const formDirty = form\.id\s*\?\s*!sameForm\(form, initialForm\)\s*:\s*hasCreateFormChanges\(form, initialForm\);/
+  );
+  assert.match(drivesPageSource, /function handleCreateFormChange\(nextForm: FormState\)/);
+  assert.match(
+    drivesPageSource,
+    /if \(!nextForm\.id && !hasCreateFormChanges\(nextForm, initialForm\)\) \{\s*setInitialForm\(nextForm\);/
+  );
+  assert.match(drivesPageSource, /onChange=\{handleCreateFormChange\}/);
+
+  const match = /function hasCreateFormChanges\(form: FormState, initial: FormState\): boolean \{([\s\S]*?)\n\}/.exec(
+    drivesPageSource
+  );
+  assert.ok(match, "create form dirty helper should be present");
+  const helper = match[1];
+
+  assert.match(helper, /form\.name\.trim\(\) !== ""/);
+  assert.match(helper, /form\.rootId\.trim\(\) !== ""/);
+  assert.match(helper, /form\.spider91UploadDriveId !== initial\.spider91UploadDriveId/);
+  assert.match(helper, /Object\.values\(form\.creds\)\.some/);
+  assert.doesNotMatch(helper, /form\.kind/);
+});
+
 test("drive generation actions can resume pending work after stop", () => {
   assert.match(driveComponentsSource, /thumbnailPendingCount/);
   assert.match(driveComponentsSource, /teaserPendingCount/);

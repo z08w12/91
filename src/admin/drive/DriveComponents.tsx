@@ -243,7 +243,7 @@ export function DriveGenerationPanel({
           onClick={onRegenFailed}
         >
           <RotateCcw size={13} />
-          <span>{(d.teaserFailedCount ?? 0) > 0 ? "重试失败预览" : "继续生成预览"}</span>
+          <span>{(d.teaserFailedCount ?? 0) > 0 ? "重试失败预览视频" : "继续生成预览视频"}</span>
         </button>
         <button
           className="admin-btn"

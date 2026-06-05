@@ -592,6 +592,35 @@ func TestThumbWorkerRequeuesP115TransientErrorBeforeRetryLimit(t *testing.T) {
 	}
 }
 
+func TestThumbWorkerPikPakMoovAtomErrorFailsWithoutCooldown(t *testing.T) {
+	ctx := context.Background()
+	cat, video := seedPreviewTestVideo(t, "thumb-pikpak-missing-moov")
+
+	mediaErr := errors.New("ffprobe: exit status 1, stderr: moov atom not found Invalid data found when processing input")
+	gen := &fakeThumbGenerator{
+		probeErr:    mediaErr,
+		generateErr: mediaErr,
+	}
+	drv := &previewFakeDrive{kind: "pikpak"}
+	worker := NewThumbWorker(gen, cat, drv)
+
+	worker.process(ctx, video)
+
+	failed, err := cat.ListVideosByThumbnailStatus(ctx, video.DriveID, "failed", 0)
+	if err != nil {
+		t.Fatalf("list failed thumbnails: %v", err)
+	}
+	if len(failed) != 1 || failed[0].ID != video.ID {
+		t.Fatalf("failed thumbnails = %#v, want only %s", failed, video.ID)
+	}
+	if !worker.Status().CooldownUntil.IsZero() {
+		t.Fatalf("cooldown until = %s, want no cooldown for invalid PikPak MP4", worker.Status().CooldownUntil)
+	}
+	if gen.generateCalls != 1 {
+		t.Fatalf("generate calls = %d, want 1", gen.generateCalls)
+	}
+}
+
 func TestPreviewWorkerP115TransientErrorKeepsVideoPending(t *testing.T) {
 	ctx := context.Background()
 	cat, video := seedPreviewTestVideo(t, "preview-p115-transient")

@@ -189,6 +189,27 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		}
 		items = appendUniqueVideos(items, fallback, homePageSize)
 	}
+	if len(items) < homePageSize && len(excludeIDs) > 0 {
+		// The browser keeps a recent-video exclude list so normal refreshes do not
+		// repeat too quickly. On small libraries that list can cover every visible
+		// video; when that happens, start a new random round instead of returning
+		// an empty home section.
+		roundExclude := videoIDs(items)
+		fallback, err := s.Catalog.RandomVideosWithReadyThumbnailsExcluding(r.Context(), roundExclude, homePageSize-len(items))
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		items = appendUniqueVideos(items, fallback, homePageSize)
+	}
+	if len(items) < homePageSize && len(excludeIDs) > 0 {
+		fallback, err := s.Catalog.RandomVideosExcluding(r.Context(), videoIDs(items), homePageSize-len(items))
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		items = appendUniqueVideos(items, fallback, homePageSize)
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, mapVideos(items))
 }
@@ -246,6 +267,16 @@ func appendUniqueVideos(dst []*catalog.Video, candidates []*catalog.Video, limit
 		}
 	}
 	return dst
+}
+
+func videoIDs(items []*catalog.Video) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if item != nil && item.ID != "" {
+			out = append(out, item.ID)
+		}
+	}
+	return out
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {

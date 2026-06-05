@@ -241,6 +241,63 @@ func TestHandleHomeExcludesRecentlyShownVideos(t *testing.T) {
 	}
 }
 
+func TestHandleHomeStartsNewRoundWhenRecentExcludesAllVisibleVideos(t *testing.T) {
+	ctx := context.Background()
+	cat, err := catalog.Open(t.TempDir() + "/catalog.db")
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := cat.Close(); err != nil {
+			t.Fatalf("close catalog: %v", err)
+		}
+	})
+
+	now := time.Now()
+	excludes := make([]string, 0, homePageSize+2)
+	for i := 0; i < homePageSize+2; i++ {
+		id := "ready-video-" + strconv.Itoa(i)
+		excludes = append(excludes, "exclude="+id)
+		if err := cat.UpsertVideo(ctx, &catalog.Video{
+			ID:           id,
+			DriveID:      "drive",
+			FileID:       id,
+			Title:        id,
+			ThumbnailURL: "https://thumb.example/" + id + ".jpg",
+			PublishedAt:  now.Add(time.Duration(i) * time.Minute),
+			CreatedAt:    now.Add(time.Duration(i) * time.Minute),
+			UpdatedAt:    now.Add(time.Duration(i) * time.Minute),
+		}); err != nil {
+			t.Fatalf("seed ready video %s: %v", id, err)
+		}
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/home?"+strings.Join(excludes, "&"), nil)
+	(&Server{Catalog: cat}).handleHome(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var got []VideoDTO
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(got) != homePageSize {
+		t.Fatalf("home items = %d, want %d; body=%s", len(got), homePageSize, rr.Body.String())
+	}
+	seen := map[string]bool{}
+	for _, item := range got {
+		if seen[item.ID] {
+			t.Fatalf("home returned duplicate video %q; items=%#v", item.ID, got)
+		}
+		seen[item.ID] = true
+		if !strings.HasPrefix(item.ID, "ready-video-") {
+			t.Fatalf("home returned unexpected video %q; items=%#v", item.ID, got)
+		}
+	}
+}
+
 func TestHandleListLatestPrefersReadyThumbnails(t *testing.T) {
 	ctx := context.Background()
 	cat, err := catalog.Open(t.TempDir() + "/catalog.db")
