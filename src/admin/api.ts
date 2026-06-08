@@ -95,6 +95,8 @@ export type AdminDrive = {
   lastCrawlAt?: number;
   // spider91 专用代理地址；仅后台管理接口返回，用于编辑表单回显。
   spider91Proxy?: string;
+  // Google Drive 是否使用 OpenList 在线续期 API；未配置时后端按 true 返回。
+  googleDriveUseOnlineAPI?: boolean;
   scanGenerationStatus?: DriveGenerationStatus;
   thumbnailGenerationStatus?: DriveGenerationStatus;
   previewGenerationStatus?: DriveGenerationStatus;

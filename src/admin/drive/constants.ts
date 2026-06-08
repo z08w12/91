@@ -147,7 +147,9 @@ export function credentialHelp(kind: Kind, isEdit: boolean): string {
     case "onedrive":
       return `按 OpenList 默认应用在线挂载，只需要 refresh_token；保存时会自动刷新并保存 token。${note}`;
     case "googledrive":
-      return `按 OpenList 在线 API 挂载，只需要 Google Drive refresh_token；保存时会自动刷新并保存 token。播放不走 302，会由后端带 Authorization 代理转发。${note}`;
+      return isEdit
+        ? "请参考OpenList文档中关于谷歌云盘的配置方法；如不修改凭证，留空即可，保存时会沿用旧值"
+        : "请参考OpenList文档中关于谷歌云盘的配置方法";
     case "localstorage":
       return `填写服务器可访问的本地目录绝对路径，例如 /mnt/videos。系统会扫描该目录及子目录中的视频文件和 .strm 文件；.strm 可指向 HTTP/HTTPS 直链，或指向本地存储根目录内的真实视频路径。Docker 部署时请填写容器内路径。${note}`;
     case "spider91":
@@ -157,14 +159,31 @@ export function credentialHelp(kind: Kind, isEdit: boolean): string {
   }
 }
 
-export function credentialFields(kind: Kind): Array<{
+export type CredentialField = {
   key: string;
   label: string;
   placeholder: string;
+  type?: "text" | "select";
+  options?: Array<{ value: string; label: string }>;
   multiline?: boolean;
   required?: boolean;
+  defaultValue?: string;
   help?: string;
-}> {
+};
+
+export function credentialBoolValue(value: string | undefined, defaultValue: boolean): boolean {
+  const normalized = (value ?? "").trim().toLowerCase();
+  if (normalized === "") return defaultValue;
+  if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on") return true;
+  if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off") return false;
+  return defaultValue;
+}
+
+export function googleDriveUsesOnlineAPI(creds: Record<string, string> = {}): boolean {
+  return credentialBoolValue(creds.use_online_api, true);
+}
+
+export function credentialFields(kind: Kind, creds: Record<string, string> = {}): CredentialField[] {
   switch (kind) {
     case "quark":
       return [
@@ -254,12 +273,41 @@ export function credentialFields(kind: Kind): Array<{
     case "googledrive":
       return [
         {
+          key: "use_online_api",
+          label: "认证方式",
+          placeholder: "",
+          type: "select",
+          defaultValue: "true",
+          options: [
+            { value: "true", label: "OpenList 在线 API" },
+            { value: "false", label: "自建 Google OAuth 客户端" },
+          ],
+        },
+        {
           key: "refresh_token",
           label: "refresh_token",
           placeholder: "OpenList Google Drive refresh_token",
           multiline: true,
           required: true,
         },
+        ...(googleDriveUsesOnlineAPI(creds)
+          ? []
+          : [
+              {
+                key: "client_id",
+                label: "客户端 ID",
+                placeholder: "xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com",
+                required: true,
+                help: "Google Cloud Console 中 OAuth 2.0 客户端的 Client ID",
+              },
+              {
+                key: "client_secret",
+                label: "客户端密钥",
+                placeholder: "Google OAuth client secret",
+                required: true,
+                help: "Google Cloud Console 中同一个 OAuth 客户端的 Client Secret",
+              },
+            ]),
       ];
     case "localstorage":
       return [

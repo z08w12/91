@@ -611,6 +611,67 @@ func TestHandleUpsertDriveReplacesExistingCredentialsWhenProvided(t *testing.T) 
 	}
 }
 
+func TestHandleUpsertGoogleDriveMergesOAuthCredentials(t *testing.T) {
+	ctx := context.Background()
+	cat, err := catalog.Open(t.TempDir() + "/catalog.db")
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := cat.Close(); err != nil {
+			t.Fatalf("close catalog: %v", err)
+		}
+	})
+
+	if err := cat.UpsertDrive(ctx, &catalog.Drive{
+		ID:     "google-main",
+		Kind:   "googledrive",
+		Name:   "Google Drive",
+		RootID: "root",
+		Credentials: map[string]string{
+			"refresh_token":   "existing-refresh",
+			"access_token":    "existing-access",
+			"use_online_api":  "true",
+			"api_url_address": "https://api.oplist.org/googleui/renewapi",
+		},
+		Status: "ok",
+	}); err != nil {
+		t.Fatalf("seed drive: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/drives", bytes.NewBufferString(`{
+		"id": "google-main",
+		"kind": "googledrive",
+		"name": "Google Drive",
+		"rootId": "root",
+		"credentials": {
+			"use_online_api": "false",
+			"client_id": "google-client-id",
+			"client_secret": "google-client-secret"
+		}
+	}`))
+	rr := httptest.NewRecorder()
+
+	(&AdminServer{Catalog: cat}).handleUpsertDrive(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	got, err := cat.GetDrive(ctx, "google-main")
+	if err != nil {
+		t.Fatalf("get drive: %v", err)
+	}
+	if got.Credentials["refresh_token"] != "existing-refresh" || got.Credentials["access_token"] != "existing-access" {
+		t.Fatalf("tokens were not preserved: %#v", got.Credentials)
+	}
+	if got.Credentials["use_online_api"] != "false" {
+		t.Fatalf("use_online_api = %q, want false", got.Credentials["use_online_api"])
+	}
+	if got.Credentials["client_id"] != "google-client-id" || got.Credentials["client_secret"] != "google-client-secret" {
+		t.Fatalf("oauth client credentials = %#v, want saved", got.Credentials)
+	}
+}
+
 func TestHandleUpsertSpider91ProxyPreservesRuntimeCredentials(t *testing.T) {
 	ctx := context.Background()
 	cat, err := catalog.Open(t.TempDir() + "/catalog.db")
@@ -902,6 +963,74 @@ func TestHandleListDrivesIncludesSpider91Proxy(t *testing.T) {
 	}
 	if byID["onedrive-main"].Spider91Proxy != "" {
 		t.Fatalf("onedrive spider91Proxy = %q, want empty", byID["onedrive-main"].Spider91Proxy)
+	}
+}
+
+func TestHandleListDrivesIncludesGoogleDriveOnlineAPIMode(t *testing.T) {
+	ctx := context.Background()
+	cat, err := catalog.Open(t.TempDir() + "/catalog.db")
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := cat.Close(); err != nil {
+			t.Fatalf("close catalog: %v", err)
+		}
+	})
+
+	for _, d := range []*catalog.Drive{
+		{
+			ID:     "google-legacy",
+			Kind:   "googledrive",
+			Name:   "Google Legacy",
+			RootID: "root",
+			Credentials: map[string]string{
+				"refresh_token": "legacy-refresh",
+			},
+			Status: "ok",
+		},
+		{
+			ID:     "google-oauth",
+			Kind:   "googledrive",
+			Name:   "Google OAuth",
+			RootID: "root",
+			Credentials: map[string]string{
+				"refresh_token":  "oauth-refresh",
+				"use_online_api": "false",
+				"client_id":      "client-id",
+				"client_secret":  "client-secret",
+			},
+			Status: "ok",
+		},
+	} {
+		if err := cat.UpsertDrive(ctx, d); err != nil {
+			t.Fatalf("seed drive %s: %v", d.ID, err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/api/drives", nil)
+	rr := httptest.NewRecorder()
+	(&AdminServer{Catalog: cat}).handleListDrives(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	var got []struct {
+		ID                      string `json:"id"`
+		GoogleDriveUseOnlineAPI bool   `json:"googleDriveUseOnlineAPI"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	byID := map[string]bool{}
+	for _, d := range got {
+		byID[d.ID] = d.GoogleDriveUseOnlineAPI
+	}
+	if !byID["google-legacy"] {
+		t.Fatalf("legacy google drive use_online_api = false, want true")
+	}
+	if byID["google-oauth"] {
+		t.Fatalf("oauth google drive use_online_api = true, want false")
 	}
 }
 

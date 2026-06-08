@@ -200,7 +200,12 @@ export function DrivesPage() {
       kind: d.kind,
       name: d.name,
       rootId: d.rootId,
-      creds: d.kind === "spider91" ? { proxy: d.spider91Proxy ?? "" } : {},
+      creds:
+        d.kind === "spider91"
+          ? { proxy: d.spider91Proxy ?? "" }
+          : d.kind === "googledrive"
+          ? { use_online_api: (d.googleDriveUseOnlineAPI ?? true) ? "true" : "false" }
+          : {},
       spider91UploadDriveId: settings?.spider91UploadDriveId ?? "",
     };
     setForm(nextForm);

@@ -112,7 +112,7 @@ test("onedrive drive form only exposes required default-app fields", () => {
   assert.doesNotMatch(fields, /key: "site_id"/);
 });
 
-test("googledrive drive form only exposes refresh token", () => {
+test("googledrive drive form supports online API and custom OAuth client modes", () => {
   assertDriveTypeOption("googledrive", "Google Drive");
 
   const match =
@@ -123,10 +123,25 @@ test("googledrive drive form only exposes refresh token", () => {
   const fields = match[1];
 
   assert.match(fields, /key: "refresh_token"/);
-  assert.doesNotMatch(fields, /key: "access_token"/);
+  assert.match(fields, /key: "use_online_api"/);
+  assert.match(fields, /type: "select"/);
+  assert.match(fields, /defaultValue: "true"/);
+  assert.match(fields, /OpenList 在线 API/);
+  assert.match(fields, /自建 Google OAuth 客户端/);
+  assert.match(fields, /key: "client_id"/);
+  assert.match(fields, /key: "client_secret"/);
+  assert.match(fields, /googleDriveUsesOnlineAPI\(creds\)/);
   assert.doesNotMatch(fields, /key: "api_url_address"/);
-  assert.doesNotMatch(fields, /key: "client_id"/);
-  assert.doesNotMatch(fields, /key: "client_secret"/);
+  assert.doesNotMatch(fields, /在线 API 模式填写 OpenList 获取的 refresh_token/);
+  assert.doesNotMatch(constantsSource, /请参考OpenList文档中关于谷歌云盘的配置方法。/);
+  assert.doesNotMatch(constantsSource, /选择自建 Google OAuth 客户端后，服务端会直接请求 Google OAuth token 接口续期。/);
+  assert.match(driveFormSource, /<select/);
+  assert.match(driveFormSource, /value=\{form\.creds\[f\.key\] \?\? f\.defaultValue \?\? ""\}/);
+  assert.match(driveFormSource, /className="admin-form-select"/);
+  assert.match(driveFormSource, /ChevronDown/);
+  assert.match(drivesPageSource, /googleDriveUseOnlineAPI/);
+  assert.match(apiSource, /googleDriveUseOnlineAPI\?: boolean/);
+  assert.doesNotMatch(fields, /key: "access_token"/);
 });
 
 test("pikpak drive form only exposes account login fields", () => {

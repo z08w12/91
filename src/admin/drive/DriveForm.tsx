@@ -1,5 +1,5 @@
 import { useId, useMemo, useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ChevronDown } from "lucide-react";
 import { P123QRCodeLogin } from "./P123QRCodeLogin";
 import { Spider91UploadTargetField } from "./Spider91UploadTargetField";
 import {
@@ -49,7 +49,7 @@ export function DriveForm({
   onBack?: () => void;
 }) {
   const idPrefix = useId();
-  const fields = useMemo(() => credentialFields(form.kind), [form.kind]);
+  const fields = useMemo(() => credentialFields(form.kind, form.creds), [form.kind, form.creds]);
   const help = credentialHelp(form.kind, isEdit);
   const [step, setStep] = useState<"type" | "form">(isEdit ? "form" : "type");
   const nameId = `${idPrefix}-drive-name`;
@@ -180,25 +180,53 @@ export function DriveForm({
 
           {fields.map((f) => (
             <div key={f.key} className="admin-form__row">
-              <label htmlFor={`${idPrefix}-credential-${f.key}`}>
-                {f.label}
-                {f.required && " *"}
-              </label>
-              {f.multiline ? (
-                <textarea
-                  id={`${idPrefix}-credential-${f.key}`}
-                  value={form.creds[f.key] ?? ""}
-                  onChange={(e) => setCred(f.key, e.target.value)}
-                  placeholder={f.placeholder}
-                />
+              {f.type === "select" ? (
+                <>
+                  <label htmlFor={`${idPrefix}-credential-${f.key}`}>
+                    {f.label}
+                    {f.required && " *"}
+                  </label>
+                  <div className="admin-form-select-wrap">
+                    <select
+                      id={`${idPrefix}-credential-${f.key}`}
+                      className="admin-form-select"
+                      value={form.creds[f.key] ?? f.defaultValue ?? ""}
+                      onChange={(e) => setCred(f.key, e.target.value)}
+                    >
+                      {(f.options ?? []).map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={15} className="admin-form-select__icon" aria-hidden="true" />
+                  </div>
+                </>
               ) : (
-                <input
-                  id={`${idPrefix}-credential-${f.key}`}
-                  type={credentialInputType(f.key)}
-                  value={form.creds[f.key] ?? ""}
-                  onChange={(e) => setCred(f.key, e.target.value)}
-                  placeholder={f.placeholder}
-                />
+                <>
+                  <label htmlFor={`${idPrefix}-credential-${f.key}`}>
+                    {f.label}
+                    {f.required && " *"}
+                  </label>
+                  {f.multiline ? (
+                    <textarea
+                      id={`${idPrefix}-credential-${f.key}`}
+                      value={form.creds[f.key] ?? ""}
+                      onChange={(e) => setCred(f.key, e.target.value)}
+                      placeholder={f.placeholder}
+                      required={f.required && !isEdit}
+                    />
+                  ) : (
+                    <input
+                      id={`${idPrefix}-credential-${f.key}`}
+                      type={credentialInputType(f.key)}
+                      value={form.creds[f.key] ?? ""}
+                      onChange={(e) => setCred(f.key, e.target.value)}
+                      placeholder={f.placeholder}
+                      required={f.required && !isEdit}
+                    />
+                  )}
+                </>
               )}
               {f.help && <div className="admin-form__help">{f.help}</div>}
             </div>

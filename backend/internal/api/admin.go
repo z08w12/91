@@ -425,6 +425,7 @@ func (a *AdminServer) handleListDrives(w http.ResponseWriter, r *http.Request) {
 		// 其它 kind 留 0；前端用它显示"上次抓取: N 小时前"。
 		Spider91Proxy                 string           `json:"spider91Proxy,omitempty"`
 		LastCrawlAt                   int64            `json:"lastCrawlAt,omitempty"`
+		GoogleDriveUseOnlineAPI       *bool            `json:"googleDriveUseOnlineAPI,omitempty"`
 		ScanGenerationStatus          GenerationStatus `json:"scanGenerationStatus"`
 		ThumbnailGenerationStatus     GenerationStatus `json:"thumbnailGenerationStatus"`
 		PreviewGenerationStatus       GenerationStatus `json:"previewGenerationStatus"`
@@ -488,6 +489,7 @@ func (a *AdminServer) handleListDrives(w http.ResponseWriter, r *http.Request) {
 			SkipDirIDs:                    append([]string{}, d.SkipDirIDs...),
 			Spider91Proxy:                 spider91ProxyForDrive(d),
 			LastCrawlAt:                   lastCrawlAt,
+			GoogleDriveUseOnlineAPI:       googleDriveUseOnlineAPIForDrive(d),
 			ScanGenerationStatus:          generation.Scan,
 			ThumbnailGenerationStatus:     generation.Thumbnail,
 			PreviewGenerationStatus:       generation.Preview,
@@ -547,6 +549,8 @@ func (a *AdminServer) handleUpsertDrive(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		body.Credentials = credentials
+	} else if body.Kind == "googledrive" {
+		body.Credentials = mergeGoogleDriveCredentials(existing, body.Credentials)
 	} else if len(body.Credentials) == 0 && existing != nil && len(existing.Credentials) > 0 {
 		body.Credentials = existing.Credentials
 	}
@@ -601,6 +605,47 @@ func spider91ProxyForDrive(d *catalog.Drive) string {
 		return ""
 	}
 	return strings.TrimSpace(d.Credentials["proxy"])
+}
+
+func googleDriveUseOnlineAPIForDrive(d *catalog.Drive) *bool {
+	if d == nil || d.Kind != "googledrive" {
+		return nil
+	}
+	result := true
+	if d.Credentials == nil {
+		return &result
+	}
+	raw := strings.TrimSpace(d.Credentials["use_online_api"])
+	if raw == "" {
+		return &result
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return &result
+	}
+	result = v
+	return &result
+}
+
+func mergeGoogleDriveCredentials(existing *catalog.Drive, incoming map[string]string) map[string]string {
+	merged := map[string]string{}
+	if existing != nil {
+		for k, v := range existing.Credentials {
+			merged[k] = v
+		}
+	}
+	for k, v := range incoming {
+		key := strings.TrimSpace(k)
+		if key == "" {
+			continue
+		}
+		value := strings.TrimSpace(v)
+		if value == "" {
+			continue
+		}
+		merged[key] = value
+	}
+	return merged
 }
 
 func mergeSpider91Credentials(existing *catalog.Drive, incoming map[string]string) (map[string]string, error) {

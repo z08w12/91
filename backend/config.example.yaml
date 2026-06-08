@@ -74,6 +74,11 @@ preview:
 #   root_id: "root"
 #   params:
 #     refresh_token: "..."
+#     # 默认 use_online_api=true，会使用 OpenList 在线续期 API。
+#     # 如需使用自己创建的 Google OAuth 客户端，取消下面三行注释：
+#     # use_online_api: "false"
+#     # client_id: "..."
+#     # client_secret: "..."
 # 本地存储示例：
 # - id: "local-media"
 #   kind: "localstorage"
