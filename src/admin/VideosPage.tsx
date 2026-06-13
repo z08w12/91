@@ -1,5 +1,17 @@
 import { useEffect, useId, useState } from "react";
-import { ChevronDown, Edit, RefreshCw, Search, CheckSquare, Square, Image, Trash2 } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import {
+  ChevronDown,
+  Edit,
+  RefreshCw,
+  Search,
+  CheckSquare,
+  Square,
+  Image,
+  Trash2,
+  Ban,
+  RotateCcw,
+} from "lucide-react";
 import * as api from "./api";
 import { useToast } from "./ToastContext";
 import { Modal } from "./Modal";
@@ -10,7 +22,85 @@ const DESKTOP_VIDEOS_PAGE_SIZE = 50;
 const MOBILE_VIDEOS_PAGE_SIZE = 20;
 const VIDEOS_MOBILE_QUERY = "(max-width: 640px)";
 
+type TabKey = "current" | "blacklist";
+
+const TABS: { key: TabKey; label: string }[] = [
+  { key: "current", label: "当前视频" },
+  { key: "blacklist", label: "拉黑视频" },
+];
+
+/**
+ * 视频管理容器：顶部分段标签在「当前 / 隐藏 / 拉黑」三个视图间切换，
+ * 激活标签同步到 URL ?tab=，标签上的计数来自 /videos/stats。
+ */
 export function VideosPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawTab = searchParams.get("tab");
+  const activeTab: TabKey = rawTab === "blacklist" ? "blacklist" : "current";
+  const [stats, setStats] = useState<api.VideoStats | null>(null);
+
+  async function refreshStats() {
+    try {
+      setStats(await api.getVideoStats());
+    } catch {
+      // 计数仅用于标签徽标，失败不阻塞主流程。
+    }
+  }
+
+  useEffect(() => {
+    refreshStats();
+  }, []);
+
+  function selectTab(key: TabKey) {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (key === "current") next.delete("tab");
+        else next.set("tab", key);
+        return next;
+      },
+      { replace: true }
+    );
+  }
+
+  const counts: Record<TabKey, number | undefined> = {
+    current: stats?.current,
+    blacklist: stats?.blacklisted,
+  };
+
+  return (
+    <section>
+      <header className="admin-page__header">
+        <h1 className="admin-page__title">视频管理</h1>
+      </header>
+
+      <div className="admin-video-tabs" role="tablist" aria-label="视频管理分类">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === t.key}
+            className={`admin-video-tab ${activeTab === t.key ? "is-active" : ""}`}
+            onClick={() => selectTab(t.key)}
+          >
+            <span>{t.label}</span>
+            {counts[t.key] !== undefined && (
+              <span className="admin-video-tab__count">{counts[t.key]}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "current" && <CurrentVideosTab onStatsChanged={refreshStats} />}
+      {activeTab === "blacklist" && <BlacklistTab onStatsChanged={refreshStats} />}
+    </section>
+  );
+}
+
+// ---------- 当前视频 ----------
+
+function CurrentVideosTab({ onStatsChanged }: { onStatsChanged: () => void }) {
   const [list, setList] = useState<api.AdminVideo[]>([]);
   const [drives, setDrives] = useState<api.AdminDrive[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,9 +164,7 @@ export function VideosPage() {
     return () => window.clearTimeout(timer);
   }, [keyword]);
 
-  const driveNameMap = new Map(
-    drives.map((d) => [d.id, d.name || d.id])
-  );
+  const driveNameMap = new Map(drives.map((d) => [d.id, d.name || d.id]));
 
   const listItems = list;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -111,13 +199,14 @@ export function VideosPage() {
     setBatchRegening(true);
     let success = 0;
     try {
-      const results = await Promise.allSettled(
-        ids.map((id) => api.regenPreview(id))
-      );
+      const results = await Promise.allSettled(ids.map((id) => api.regenPreview(id)));
       for (const r of results) {
         if (r.status === "fulfilled") success++;
       }
-      show(`批量触发完成，成功 ${success} / ${ids.length} 个`, success === ids.length ? "success" : "info");
+      show(
+        `批量触发完成，成功 ${success} / ${ids.length} 个`,
+        success === ids.length ? "success" : "info"
+      );
       setSelectedIds(new Set());
       setBatchRegenOpen(false);
     } finally {
@@ -139,6 +228,7 @@ export function VideosPage() {
         return next;
       });
       show(result.deletedSource ? "已删除视频，并清理源文件" : "已删除视频", "success");
+      onStatsChanged();
       if (listItems.length === 1 && page > 1) {
         setPage((p) => Math.max(1, p - 1));
       } else {
@@ -172,11 +262,15 @@ export function VideosPage() {
         const extra = deletedSources > 0 ? `，其中 ${deletedSources} 个清理了源文件` : "";
         show(`批量删除完成，成功 ${success} 个${extra}`, "success");
       } else {
-        show(`批量删除完成，成功 ${success} / ${ids.length} 个，失败 ${failed} 个`, success > 0 ? "info" : "error");
+        show(
+          `批量删除完成，成功 ${success} / ${ids.length} 个，失败 ${failed} 个`,
+          success > 0 ? "info" : "error"
+        );
       }
       setSelectedIds(new Set());
       setBatchDeleteOpen(false);
       setBatchDeleteSource(false);
+      onStatsChanged();
       if (success >= listItems.length && page > 1) {
         setPage((p) => Math.max(1, p - 1));
       } else {
@@ -191,7 +285,7 @@ export function VideosPage() {
     if (selectedIds.size === listItems.length && listItems.length > 0) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(listItems.map(v => v.id)));
+      setSelectedIds(new Set(listItems.map((v) => v.id)));
     }
   };
 
@@ -209,52 +303,21 @@ export function VideosPage() {
   }
 
   return (
-    <section>
-      <header className="admin-page__header">
-        <h1 className="admin-page__title">视频管理</h1>
-        <div className="admin-page__actions admin-videos-filter">
-          <div className="admin-videos-filter__select-wrap">
-            <select
-              className="admin-videos-filter__select"
-              value={driveId}
-              onChange={(e) => {
-                setDriveId(e.target.value);
-                setPage(1);
-              }}
-            >
-              <option value="">全部网盘</option>
-              {drives.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name || d.id}（已生成 {d.teaserReadyCount ?? 0}，待生成{" "}
-                  {d.teaserPendingCount ?? 0}）
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={15} className="admin-videos-filter__select-icon" aria-hidden="true" />
-          </div>
-          <form className="admin-videos-filter__search" onSubmit={handleSearchSubmit}>
-            <Search size={14} className="admin-videos-filter__search-icon" />
-            <input
-              aria-label="搜索标题或作者"
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
-              placeholder="搜索标题 / 作者"
-            />
-          </form>
-          <button type="button" className="admin-btn" onClick={refresh}>
-            <RefreshCw size={13} /> 刷新
-          </button>
-        </div>
-      </header>
+    <>
+      <div className="admin-page__actions admin-videos-filter">
+        <DriveFilter drives={drives} driveId={driveId} onChange={(id) => { setDriveId(id); setPage(1); }} withCounts />
+        <SearchBox keyword={keyword} onChange={setKeyword} onSubmit={handleSearchSubmit} />
+        <button type="button" className="admin-btn" onClick={refresh}>
+          <RefreshCw size={13} /> 刷新
+        </button>
+      </div>
 
       {!loading && (
         <div className="admin-videos-list-toolbar">
           <div className="admin-videos-summary">{listSummary}</div>
           {selectedIds.size > 0 && (
             <div className="admin-videos-bulk-actions">
-              <span className="admin-videos-bulk-actions__count">
-                已选择 {selectedIds.size} 项
-              </span>
+              <span className="admin-videos-bulk-actions__count">已选择 {selectedIds.size} 项</span>
               <button type="button" className="admin-btn is-primary admin-videos-bulk-actions__btn" onClick={handleBatchRegen}>
                 <RefreshCw size={13} /> 批量重生预览视频
               </button>
@@ -267,18 +330,9 @@ export function VideosPage() {
       )}
 
       {loading ? (
-        <div className="admin-loading-state">
-          <RefreshCw size={20} className="admin-spin" />
-          <span>加载中...</span>
-        </div>
+        <LoadingState />
       ) : loadError ? (
-        <div className="admin-error-state">
-          <strong>视频加载失败</strong>
-          <span>{loadError}</span>
-          <button type="button" className="admin-btn" onClick={refresh}>
-            <RefreshCw size={13} /> 重试
-          </button>
-        </div>
+        <ErrorState message={loadError} onRetry={refresh} />
       ) : listItems.length === 0 ? (
         <div className="admin-empty-state">
           <div className="admin-empty-state__icon">
@@ -295,14 +349,22 @@ export function VideosPage() {
           <table className="admin-table is-selectable admin-videos-table">
             <thead>
               <tr>
-                <th className="is-checkbox" style={{ width: '40px' }}>
+                <th className="is-checkbox" style={{ width: "40px" }}>
                   <button
                     type="button"
                     className="admin-table-checkbox-btn"
                     onClick={toggleSelectAll}
-                    aria-label={selectedIds.size > 0 && selectedIds.size === listItems.length ? "清空当前页选择" : "选择当前页视频"}
+                    aria-label={
+                      selectedIds.size > 0 && selectedIds.size === listItems.length
+                        ? "清空当前页选择"
+                        : "选择当前页视频"
+                    }
                   >
-                    {selectedIds.size > 0 && selectedIds.size === listItems.length ? <CheckSquare size={16} /> : <Square size={16} />}
+                    {selectedIds.size > 0 && selectedIds.size === listItems.length ? (
+                      <CheckSquare size={16} />
+                    ) : (
+                      <Square size={16} />
+                    )}
                   </button>
                 </th>
                 <th>标题</th>
@@ -323,35 +385,15 @@ export function VideosPage() {
                       onClick={() => toggleSelect(v.id)}
                       aria-label={`${selectedIds.has(v.id) ? "取消选择" : "选择"}视频 ${v.title}`}
                     >
-                      {selectedIds.has(v.id) ? <CheckSquare size={16} color="var(--accent)" /> : <Square size={16} color="var(--border-strong)" />}
+                      {selectedIds.has(v.id) ? (
+                        <CheckSquare size={16} color="var(--accent)" />
+                      ) : (
+                        <Square size={16} color="var(--border-strong)" />
+                      )}
                     </button>
                   </td>
                   <td data-label="标题">
-                    <div className="admin-video-title-cell">
-                      <div className="admin-video-thumb-wrap" aria-hidden="true">
-                        {v.thumbnailUrl ? (
-                          <img className="admin-video-thumb" src={v.thumbnailUrl} alt="" />
-                        ) : (
-                          <div className="admin-video-thumb-placeholder">
-                            <Image size={14} />
-                          </div>
-                        )}
-                      </div>
-                      <div className="admin-video-title-body">
-                        <div className="admin-video-title">{v.title}</div>
-                        {fileMeta(v) && (
-                          <div className="admin-video-filemeta">{fileMeta(v)}</div>
-                        )}
-                        {(v.tags ?? []).length > 0 && (
-                          <div className="admin-pills admin-video-title-tags">
-                            {(v.tags ?? []).map((t) => (
-                              <span key={t} className="admin-pill">{t}</span>
-                            ))}
-                          </div>
-                        )}
-                        <VideoFileMetaPills video={v} />
-                      </div>
-                    </div>
+                    <VideoTitleCell video={v} />
                   </td>
                   <td data-label="作者">{v.author || <span className="admin-text-faint">—</span>}</td>
                   <td data-label="时长">{formatDur(v.durationSeconds)}</td>
@@ -384,43 +426,7 @@ export function VideosPage() {
               ))}
             </tbody>
           </table>
-          <div className="admin-table-pagination">
-            <button
-              type="button"
-              className="admin-btn"
-              onClick={() => setPage(1)}
-              disabled={page <= 1}
-            >
-              首页
-            </button>
-            <button
-              type="button"
-              className="admin-btn"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page <= 1}
-            >
-              上一页
-            </button>
-            <span className="admin-table-pagination__info">
-              第 {page} / {totalPages} 页，每页 {pageSize} 个
-            </span>
-            <button
-              type="button"
-              className="admin-btn"
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page >= totalPages}
-            >
-              下一页
-            </button>
-            <button
-              type="button"
-              className="admin-btn"
-              onClick={() => setPage(totalPages)}
-              disabled={page >= totalPages}
-            >
-              末页
-            </button>
-          </div>
+          <Pagination page={page} totalPages={totalPages} pageSize={pageSize} onPage={setPage} />
         </>
       )}
 
@@ -463,18 +469,7 @@ export function VideosPage() {
         }}
         onConfirm={confirmDeleteVideo}
       >
-        <label className="admin-delete-source-option">
-          <input
-            type="checkbox"
-            checked={deleteSource}
-            disabled={deleting}
-            onChange={(e) => setDeleteSource(e.target.checked)}
-          />
-          <span>
-            <strong>同时删除网盘中的源文件</strong>
-            <small>开启后会先删除源文件，失败则不会删除管理库记录。</small>
-          </span>
-        </label>
+        <DeleteSourceOption checked={deleteSource} disabled={deleting} onChange={setDeleteSource} note="开启后会先删除源文件，失败则不会删除管理库记录。" />
       </ConfirmModal>
       <ConfirmModal
         open={batchDeleteOpen}
@@ -493,20 +488,346 @@ export function VideosPage() {
         }}
         onConfirm={confirmBatchDelete}
       >
-        <label className="admin-delete-source-option">
-          <input
-            type="checkbox"
-            checked={batchDeleteSource}
-            disabled={batchDeleting}
-            onChange={(e) => setBatchDeleteSource(e.target.checked)}
-          />
-          <span>
-            <strong>同时删除网盘中的源文件</strong>
-            <small>开启后会先删除源文件，失败的视频会保留管理库记录。</small>
-          </span>
-        </label>
+        <DeleteSourceOption checked={batchDeleteSource} disabled={batchDeleting} onChange={setBatchDeleteSource} note="开启后会先删除源文件，失败的视频会保留管理库记录。" />
       </ConfirmModal>
-    </section>
+    </>
+  );
+}
+
+// ---------- 拉黑视频 ----------
+
+function BlacklistTab({ onStatsChanged }: { onStatsChanged: () => void }) {
+  const [list, setList] = useState<api.AdminDeletedVideo[]>([]);
+  const [drives, setDrives] = useState<api.AdminDrive[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [keyword, setKeyword] = useState("");
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [removeTarget, setRemoveTarget] = useState<api.AdminDeletedVideo | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const pageSize = useVideosPageSize();
+  const { show } = useToast();
+
+  async function refresh() {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const [r, driveList] = await Promise.all([
+        api.listBlacklist({ page, size: pageSize, keyword: searchKeyword }),
+        api.listDrives(),
+      ]);
+      setList(r.items ?? []);
+      setTotal(r.total ?? 0);
+      setDrives(driveList ?? []);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "加载失败";
+      setLoadError(message);
+      show(message, "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    refresh();
+  }, [page, searchKeyword, pageSize]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [pageSize]);
+
+  useEffect(() => {
+    if (keyword === searchKeyword) return;
+    const timer = window.setTimeout(() => {
+      setSearchKeyword(keyword);
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [keyword]);
+
+  const driveNameMap = new Map(drives.map((d) => [d.id, d.name || d.id]));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  async function confirmRemove() {
+    if (!removeTarget) return;
+    const target = removeTarget;
+    setRemoving(true);
+    try {
+      await api.removeBlacklist(target.id);
+      setRemoveTarget(null);
+      show("已移出黑名单，下次扫盘会重新入库", "success");
+      onStatsChanged();
+      if (list.length === 1 && page > 1) {
+        setPage((p) => Math.max(1, p - 1));
+      } else {
+        refresh();
+      }
+    } catch (e) {
+      show(e instanceof Error ? e.message : "操作失败", "error");
+    } finally {
+      setRemoving(false);
+    }
+  }
+
+  function handleSearchSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSearchKeyword(keyword);
+    setPage(1);
+  }
+
+  return (
+    <>
+      <div className="admin-tab-intro">
+        被删除和被隐藏的视频会进入黑名单，扫盘时不再重新入库。这里只保留文件名等基本信息（原始记录、封面、预览已删除）。移出黑名单后，视频会在下次扫盘时被重新发现并入库
+      </div>
+      <div className="admin-page__actions admin-videos-filter">
+        <SearchBox keyword={keyword} onChange={setKeyword} onSubmit={handleSearchSubmit} placeholder="搜索文件名" />
+        <button type="button" className="admin-btn" onClick={refresh}>
+          <RefreshCw size={13} /> 刷新
+        </button>
+      </div>
+
+      {loading ? (
+        <LoadingState />
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={refresh} />
+      ) : list.length === 0 ? (
+        <div className="admin-empty-state">
+          <div className="admin-empty-state__icon">
+            <Ban size={48} />
+          </div>
+          <div className="admin-empty-state__text">黑名单为空。</div>
+        </div>
+      ) : (
+        <>
+          <div className="admin-videos-list-toolbar">
+            <div className="admin-videos-summary">共 {total} 个拉黑视频</div>
+          </div>
+          <table className="admin-table admin-blacklist-table">
+            <thead>
+              <tr>
+                <th>文件名</th>
+                <th>来源</th>
+                <th>大小</th>
+                <th>拉黑时间</th>
+                <th className="is-actions">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((v) => (
+                <tr key={v.id}>
+                  <td data-label="文件名">
+                    <span className="admin-blacklist-filename">{v.fileName || <span className="admin-text-faint">（无文件名）</span>}</span>
+                  </td>
+                  <td data-label="来源" className="admin-mono-cell">
+                    {driveNameMap.get(v.driveId) ?? v.driveId}
+                  </td>
+                  <td data-label="大小">{v.size > 0 ? formatBytes(v.size) : <span className="admin-text-faint">—</span>}</td>
+                  <td data-label="拉黑时间">{formatDateTime(v.deletedAt)}</td>
+                  <td className="is-actions" data-label="操作">
+                    <button
+                      type="button"
+                      className="admin-btn admin-blacklist-restore-btn"
+                      onClick={() => setRemoveTarget(v)}
+                      title="移出黑名单"
+                    >
+                      <RotateCcw size={13} /> 移出黑名单
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <Pagination page={page} totalPages={totalPages} pageSize={pageSize} onPage={setPage} />
+        </>
+      )}
+
+      <ConfirmModal
+        open={removeTarget !== null}
+        title="移出黑名单"
+        message={
+          removeTarget
+            ? `确定把「${removeTarget.fileName || removeTarget.id}」移出黑名单吗？移出后它会在下次扫盘时被重新发现并入库。`
+            : ""
+        }
+        confirmText="移出黑名单"
+        centerMessage
+        loading={removing}
+        onCancel={() => {
+          if (!removing) setRemoveTarget(null);
+        }}
+        onConfirm={confirmRemove}
+      />
+    </>
+  );
+}
+
+// ---------- 共享小组件 ----------
+
+function DriveFilter({
+  drives,
+  driveId,
+  onChange,
+  withCounts = false,
+}: {
+  drives: api.AdminDrive[];
+  driveId: string;
+  onChange: (id: string) => void;
+  withCounts?: boolean;
+}) {
+  return (
+    <div className="admin-videos-filter__select-wrap">
+      <select
+        className="admin-videos-filter__select"
+        value={driveId}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">全部网盘</option>
+        {drives.map((d) => (
+          <option key={d.id} value={d.id}>
+            {d.name || d.id}
+            {withCounts ? `（已生成 ${d.teaserReadyCount ?? 0}，待生成 ${d.teaserPendingCount ?? 0}）` : ""}
+          </option>
+        ))}
+      </select>
+      <ChevronDown size={15} className="admin-videos-filter__select-icon" aria-hidden="true" />
+    </div>
+  );
+}
+
+function SearchBox({
+  keyword,
+  onChange,
+  onSubmit,
+  placeholder = "搜索标题 / 作者",
+}: {
+  keyword: string;
+  onChange: (v: string) => void;
+  onSubmit: (e: React.FormEvent) => void;
+  placeholder?: string;
+}) {
+  return (
+    <form className="admin-videos-filter__search" onSubmit={onSubmit}>
+      <Search size={14} className="admin-videos-filter__search-icon" />
+      <input
+        aria-label={placeholder}
+        value={keyword}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+    </form>
+  );
+}
+
+function Pagination({
+  page,
+  totalPages,
+  pageSize,
+  onPage,
+}: {
+  page: number;
+  totalPages: number;
+  pageSize: number;
+  onPage: React.Dispatch<React.SetStateAction<number>>;
+}) {
+  return (
+    <div className="admin-table-pagination">
+      <button type="button" className="admin-btn" onClick={() => onPage(() => 1)} disabled={page <= 1}>
+        首页
+      </button>
+      <button type="button" className="admin-btn" onClick={() => onPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+        上一页
+      </button>
+      <span className="admin-table-pagination__info">
+        第 {page} / {totalPages} 页，每页 {pageSize} 个
+      </span>
+      <button
+        type="button"
+        className="admin-btn"
+        onClick={() => onPage((p) => Math.min(totalPages, p + 1))}
+        disabled={page >= totalPages}
+      >
+        下一页
+      </button>
+      <button type="button" className="admin-btn" onClick={() => onPage(() => totalPages)} disabled={page >= totalPages}>
+        末页
+      </button>
+    </div>
+  );
+}
+
+function LoadingState() {
+  return (
+    <div className="admin-loading-state">
+      <RefreshCw size={20} className="admin-spin" />
+      <span>加载中...</span>
+    </div>
+  );
+}
+
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="admin-error-state">
+      <strong>加载失败</strong>
+      <span>{message}</span>
+      <button type="button" className="admin-btn" onClick={onRetry}>
+        <RefreshCw size={13} /> 重试
+      </button>
+    </div>
+  );
+}
+
+function DeleteSourceOption({
+  checked,
+  disabled,
+  onChange,
+  note,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  onChange: (v: boolean) => void;
+  note: string;
+}) {
+  return (
+    <label className="admin-delete-source-option">
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
+      <span>
+        <strong>同时删除网盘中的源文件</strong>
+        <small>{note}</small>
+      </span>
+    </label>
+  );
+}
+
+function VideoTitleCell({ video: v }: { video: api.AdminVideo }) {
+  return (
+    <div className="admin-video-title-cell">
+      <div className="admin-video-thumb-wrap" aria-hidden="true">
+        {v.thumbnailUrl ? (
+          <img className="admin-video-thumb" src={v.thumbnailUrl} alt="" />
+        ) : (
+          <div className="admin-video-thumb-placeholder">
+            <Image size={14} />
+          </div>
+        )}
+      </div>
+      <div className="admin-video-title-body">
+        <div className="admin-video-title">{v.title}</div>
+        {fileMeta(v) && <div className="admin-video-filemeta">{fileMeta(v)}</div>}
+        {(v.tags ?? []).length > 0 && (
+          <div className="admin-pills admin-video-title-tags">
+            {(v.tags ?? []).map((t) => (
+              <span key={t} className="admin-pill">
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
+        <VideoFileMetaPills video={v} />
+      </div>
+    </div>
   );
 }
 
@@ -529,11 +850,7 @@ function VideoFileMetaPills({ video }: { video: api.AdminVideo }) {
           {part}
         </span>
       ))}
-      {category && (
-        <span className="admin-video-filemeta-pill is-category">
-          {category}
-        </span>
-      )}
+      {category && <span className="admin-video-filemeta-pill is-category">{category}</span>}
     </div>
   );
 }
@@ -545,11 +862,17 @@ function formatDur(sec: number): string {
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
+function formatDateTime(ms: number): string {
+  if (!ms) return "—";
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "—";
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function useVideosPageSize() {
   const [pageSize, setPageSize] = useState(() =>
-    window.matchMedia(VIDEOS_MOBILE_QUERY).matches
-      ? MOBILE_VIDEOS_PAGE_SIZE
-      : DESKTOP_VIDEOS_PAGE_SIZE
+    window.matchMedia(VIDEOS_MOBILE_QUERY).matches ? MOBILE_VIDEOS_PAGE_SIZE : DESKTOP_VIDEOS_PAGE_SIZE
   );
 
   useEffect(() => {
@@ -683,12 +1006,12 @@ function EditVideoModal({
           <div className="admin-thumbnail-preview">
             <input id={`${idPrefix}-video-thumbnail`} value={thumbnail} onChange={(e) => setThumbnail(e.target.value)} />
             {thumbnail && (
-              <img 
-                src={thumbnail} 
-                alt="封面预览" 
-                className="admin-thumbnail-img" 
-                onError={(e) => (e.currentTarget.style.display = 'none')} 
-                onLoad={(e) => (e.currentTarget.style.display = 'block')} 
+              <img
+                src={thumbnail}
+                alt="封面预览"
+                className="admin-thumbnail-img"
+                onError={(e) => (e.currentTarget.style.display = "none")}
+                onLoad={(e) => (e.currentTarget.style.display = "block")}
               />
             )}
           </div>
@@ -730,11 +1053,7 @@ function fileMeta(v: api.AdminVideo): string {
 }
 
 function fileMetaParts(v: api.AdminVideo): string[] {
-  return [
-    normalizeExt(v.ext),
-    v.quality,
-    v.size > 0 ? formatBytes(v.size) : "",
-  ].filter(Boolean);
+  return [normalizeExt(v.ext), v.quality, v.size > 0 ? formatBytes(v.size) : ""].filter(Boolean);
 }
 
 function normalizeExt(ext: string): string {
@@ -750,7 +1069,5 @@ function splitList(s: string): string[] {
 }
 
 function toggleTag(tags: string[], label: string): string[] {
-  return tags.includes(label)
-    ? tags.filter((tag) => tag !== label)
-    : [...tags, label];
+  return tags.includes(label) ? tags.filter((tag) => tag !== label) : [...tags, label];
 }

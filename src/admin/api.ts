@@ -510,7 +510,9 @@ export type AdminVideoList = {
   size: number;
 };
 
-export function listVideos(params: { driveId?: string; page?: number; size?: number; keyword?: string } = {}) {
+export function listVideos(
+  params: { driveId?: string; page?: number; size?: number; keyword?: string } = {}
+) {
   const qs = new URLSearchParams();
   if (params.driveId) qs.set("driveId", params.driveId);
   if (params.page) qs.set("page", String(params.page));
@@ -518,6 +520,50 @@ export function listVideos(params: { driveId?: string; page?: number; size?: num
   if (params.keyword) qs.set("keyword", params.keyword);
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return request<AdminVideoList>(`/videos${suffix}`);
+}
+
+// 后台视频管理两个标签页的计数。
+export type VideoStats = {
+  current: number;
+  blacklisted: number;
+};
+
+export function getVideoStats() {
+  return request<VideoStats>("/videos/stats");
+}
+
+// 黑名单（被拉黑/手动删除、扫盘不再入库的视频）。原始记录已删除，
+// 只剩文件名/来源盘/大小/拉黑时间。
+export type AdminDeletedVideo = {
+  id: string;
+  driveId: string;
+  fileId: string;
+  fileName: string;
+  size: number;
+  deletedAt: number;
+};
+
+export type AdminBlacklistList = {
+  items: AdminDeletedVideo[];
+  total: number;
+  page: number;
+  size: number;
+};
+
+export function listBlacklist(params: { page?: number; size?: number; keyword?: string } = {}) {
+  const qs = new URLSearchParams();
+  if (params.page) qs.set("page", String(params.page));
+  if (params.size) qs.set("size", String(params.size));
+  if (params.keyword) qs.set("keyword", params.keyword);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return request<AdminBlacklistList>(`/blacklist${suffix}`);
+}
+
+// 把视频移出黑名单（删除墓碑），下次扫盘会重新入库。
+export function removeBlacklist(id: string) {
+  return request<{ ok: boolean }>(`/blacklist/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 export type UpdateVideoInput = Partial<{

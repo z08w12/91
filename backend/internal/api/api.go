@@ -55,6 +55,10 @@ type Server struct {
 	LocalDir        string
 	UploadDir       string
 	OnVideoUploaded func(*catalog.Video)
+	// OnHideVideo 处理前台「不再展示」。隐藏机制已废弃，改走拉黑逻辑：
+	// 删除库中记录 + 本地封面/预览，保留网盘源文件，并写黑名单墓碑
+	// （扫盘不再入库）。未注入时回退为旧的 hidden 标记。
+	OnHideVideo func(ctx context.Context, videoID string) error
 
 	tagCacheMu    sync.Mutex
 	tagCacheUntil time.Time
@@ -687,7 +691,14 @@ func (s *Server) handleView(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHideVideo(w http.ResponseWriter, r *http.Request) {
 	id := routeParam(r, "id")
-	if err := s.Catalog.HideVideo(r.Context(), id); err != nil {
+	var err error
+	if s.OnHideVideo != nil {
+		// 走拉黑逻辑：删记录 + 删本地封面/预览 + 写墓碑，保留网盘源文件。
+		err = s.OnHideVideo(r.Context(), id)
+	} else {
+		err = s.Catalog.HideVideo(r.Context(), id)
+	}
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeErr(w, http.StatusNotFound, err)
 			return

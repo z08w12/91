@@ -1819,6 +1819,10 @@
   letter-spacing: 0.06em;
 }
 
+.admin-table th.is-actions {
+  text-align: center;
+}
+
 .admin-table tr:last-child td {
   border-bottom: 0;
 }
@@ -1830,7 +1834,7 @@
 }
 
 .admin-table td.is-actions {
-  text-align: right;
+  text-align: center;
   white-space: nowrap;
 }
 
@@ -3334,12 +3338,104 @@
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* 视频管理：当前 / 隐藏 / 拉黑 分段标签 */
+.admin-video-tabs {
+  display: flex;
+  gap: var(--space-1);
+  padding: 4px;
+  margin-bottom: var(--space-4);
+  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.admin-video-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  border-radius: 7px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.admin-video-tab:hover {
+  color: var(--text-default);
+}
+
+.admin-video-tab.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.admin-video-tab__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  border-radius: 9px;
+  background: var(--border-default);
+  color: var(--text-default);
+}
+
+.admin-video-tab.is-active .admin-video-tab__count {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+/* 标签页顶部说明文字 */
+.admin-tab-intro {
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+  line-height: 1.6;
+  margin-bottom: var(--space-3);
+  padding: 10px 12px;
+  background: var(--surface-2, rgba(127, 127, 127, 0.06));
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+}
+
+.admin-blacklist-filename {
+  display: block;
+  min-width: 0;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+.admin-blacklist-restore-btn {
+  border-color: var(--border-accent);
+  background: var(--accent-softer);
+  color: var(--accent);
+  box-shadow: none;
+}
+
+.admin-blacklist-restore-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  box-shadow: none;
+}
+
 .admin-videos-list-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  margin: -8px 0 var(--space-4);
+  margin: var(--space-2) 0 var(--space-4);
 }
 
 .admin-videos-summary {
@@ -3352,6 +3448,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
   flex: none;
 }
 
@@ -3401,9 +3498,11 @@
 }
 
 .admin-table-pagination__info {
+  min-width: 0;
   font-size: var(--font-xs);
   color: var(--text-faint);
   margin: 0 var(--space-2);
+  text-align: center;
 }
 
 .admin-form__divider {
@@ -3433,14 +3532,63 @@
     justify-content: center;
   }
 
+  .admin-table-pagination__info {
+    order: -1;
+    flex: 1 0 100%;
+    margin: 0 0 2px;
+  }
+
   .admin-videos-list-toolbar {
     align-items: stretch;
     flex-direction: column;
   }
 
   .admin-videos-bulk-actions {
-    justify-content: space-between;
+    flex-wrap: wrap;
+    justify-content: flex-start;
     width: 100%;
+  }
+
+  .admin-videos-bulk-actions__count {
+    flex: 1 0 100%;
+  }
+
+  .admin-videos-bulk-actions__btn {
+    flex: 1 1 136px;
+    justify-content: center;
+    min-width: 0;
+  }
+
+  .admin-blacklist-table:not(.admin-drives-table) td[data-label="文件名"] {
+    grid-column: 1 / -1;
+  }
+
+  .admin-blacklist-table:not(.admin-drives-table) td[data-label="拉黑时间"] {
+    grid-column: 1;
+    align-content: center;
+  }
+
+  .admin-blacklist-table:not(.admin-drives-table) td.is-actions {
+    grid-column: 2;
+    align-content: center;
+    align-items: center;
+    justify-content: flex-end;
+    text-align: right;
+  }
+
+  .admin-blacklist-table:not(.admin-drives-table) td.is-actions::before {
+    content: none;
+    display: none;
+  }
+
+  .admin-blacklist-table:not(.admin-drives-table) td.is-actions .admin-btn {
+    justify-content: center;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 32px;
+    padding: 6px 10px;
+    white-space: normal;
   }
 }
 

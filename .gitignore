@@ -37,6 +37,13 @@ __pycache__/
 *.pyc
 
 # Local scratch images
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif
+/*.webp
+/*.bmp
+/*.ico
 /image.jpg
 /image003.jpg
 /image004.jpg

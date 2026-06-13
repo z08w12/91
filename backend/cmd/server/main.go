@@ -131,6 +131,13 @@ func main() {
 		OnVideoUploaded: func(v *catalog.Video) {
 			app.enqueueUploadedVideo(ctx, v)
 		},
+		// 前台「不再展示」走拉黑逻辑：删记录 + 删本地封面/预览 + 写墓碑，
+		// 保留网盘源文件（deleteSource=false）。下次扫盘不再入库；如需恢复，
+		// 在后台「拉黑视频」移出黑名单即可，扫盘时会重新添加回来。
+		OnHideVideo: func(reqCtx context.Context, videoID string) error {
+			_, err := app.deleteVideo(reqCtx, videoID, false)
+			return err
+		},
 		GetTheme: func() string { return app.Theme() },
 	}
 
@@ -312,6 +319,7 @@ func main() {
 		}
 	}()
 	go app.attachExistingDrives(ctx)
+	go app.migrateHiddenVideosToTombstone(ctx)
 
 	// 等待退出信号
 	sigs := make(chan os.Signal, 1)
@@ -1970,6 +1978,33 @@ func (a *App) cleanupMissingDriveVideos(ctx context.Context, driveID string, liv
 		removed++
 	}
 	return removed, nil
+}
+
+// migrateHiddenVideosToTombstone 把历史「隐藏」视频一次性迁移为黑名单墓碑。
+// 隐藏机制已废弃——前台「不再展示」改走拉黑逻辑。迁移＝删库记录 + 删本地
+// 封面/预览 + 写墓碑，保留网盘源文件。迁移后无 hidden=1 记录，重复执行为空操作。
+func (a *App) migrateHiddenVideosToTombstone(ctx context.Context) {
+	if a == nil || a.cat == nil {
+		return
+	}
+	hidden, err := a.cat.ListHiddenVideos(ctx)
+	if err != nil {
+		log.Printf("[migrate] list hidden videos: %v", err)
+		return
+	}
+	if len(hidden) == 0 {
+		return
+	}
+	log.Printf("[migrate] converting %d hidden video(s) to blacklist tombstones", len(hidden))
+	migrated := 0
+	for _, v := range hidden {
+		if _, err := a.deleteVideo(ctx, v.ID, false); err != nil {
+			log.Printf("[migrate] hidden->tombstone %s: %v", v.ID, err)
+			continue
+		}
+		migrated++
+	}
+	log.Printf("[migrate] hidden->tombstone done: %d/%d", migrated, len(hidden))
 }
 
 func (a *App) deleteVideo(ctx context.Context, videoID string, deleteSource bool) (api.DeleteVideoResult, error) {

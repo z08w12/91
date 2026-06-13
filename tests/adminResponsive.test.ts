@@ -100,6 +100,69 @@ test("admin video bulk actions use semantic theme colors", () => {
   assert.doesNotMatch(bulkBodies, /#ff5b8a|#fff6f9|rgba\(255,\s*91,\s*138/);
 });
 
+test("admin video list summary stays below filter controls", () => {
+  const toolbar = ruleBody(adminCss, ".admin-videos-list-toolbar");
+
+  assert.match(toolbar, /margin\s*:\s*var\(--space-2\)\s+0\s+var\(--space-4\)/);
+  assert.doesNotMatch(toolbar, /margin\s*:\s*-/);
+});
+
+test("admin table action headers center-align with action buttons", () => {
+  const actionHeader = ruleBody(adminCss, ".admin-table th.is-actions");
+  const actionCell = ruleBody(adminCss, ".admin-table td.is-actions");
+
+  assert.match(actionHeader, /text-align\s*:\s*center/);
+  assert.match(actionCell, /text-align\s*:\s*center/);
+});
+
+test("blacklist restore action uses a light button style", () => {
+  const restoreButton = ruleBody(adminCss, ".admin-blacklist-restore-btn");
+
+  assert.match(videosPageSource, /className="admin-btn admin-blacklist-restore-btn"/);
+  assert.match(restoreButton, /background\s*:\s*var\(--accent-softer\)/);
+  assert.match(restoreButton, /color\s*:\s*var\(--accent\)/);
+  assert.doesNotMatch(restoreButton, /background\s*:\s*var\(--accent\)/);
+});
+
+test("admin video management controls wrap instead of covering text on mobile", () => {
+  const css = mobileCss();
+  const paginationInfo = allRuleBodies(css, ".admin-table-pagination__info");
+  const bulkActions = allRuleBodies(css, ".admin-videos-bulk-actions");
+  const bulkCount = allRuleBodies(css, ".admin-videos-bulk-actions__count");
+  const bulkButton = allRuleBodies(css, ".admin-videos-bulk-actions__btn");
+  const blacklistName = ruleBody(
+    css,
+    '.admin-blacklist-table:not(.admin-drives-table) td[data-label="文件名"]'
+  );
+  const blacklistTime = ruleBody(
+    css,
+    '.admin-blacklist-table:not(.admin-drives-table) td[data-label="拉黑时间"]'
+  );
+  const blacklistActions = ruleBody(
+    css,
+    ".admin-blacklist-table:not(.admin-drives-table) td.is-actions"
+  );
+  const blacklistActionsLabel = ruleBody(
+    css,
+    ".admin-blacklist-table:not(.admin-drives-table) td.is-actions::before"
+  );
+  const blacklistActionButton = ruleBody(
+    css,
+    ".admin-blacklist-table:not(.admin-drives-table) td.is-actions .admin-btn"
+  );
+
+  assert.match(paginationInfo, /flex\s*:\s*1\s+0\s+100%/);
+  assert.match(bulkActions, /flex-wrap\s*:\s*wrap/);
+  assert.match(bulkCount, /flex\s*:\s*1\s+0\s+100%/);
+  assert.match(bulkButton, /min-width\s*:\s*0/);
+  assert.match(blacklistName, /grid-column\s*:\s*1\s*\/\s*-1/);
+  assert.match(blacklistTime, /grid-column\s*:\s*1/);
+  assert.match(blacklistActions, /grid-column\s*:\s*2/);
+  assert.match(blacklistActions, /justify-content\s*:\s*flex-end/);
+  assert.match(blacklistActionsLabel, /content\s*:\s*none/);
+  assert.match(blacklistActionButton, /white-space\s*:\s*normal/);
+});
+
 test("admin loading spinner rotates around icon center", () => {
   const spinner = ruleBody(adminCss, ".admin-spin");
   const reducedMotion = ruleBodyByContains(adminCss, ".admin-sidebar__check-update:disabled svg");

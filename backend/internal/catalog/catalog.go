@@ -287,6 +287,27 @@ func (c *Catalog) HideVideo(ctx context.Context, id string) error {
 	return nil
 }
 
+// ListHiddenVideos 返回所有被标记隐藏（hidden=1）的视频。
+// 仅用于一次性把历史「隐藏」视频迁移为黑名单墓碑——隐藏机制已废弃，
+// 前台「不再展示」改走拉黑逻辑。
+func (c *Catalog) ListHiddenVideos(ctx context.Context) ([]*Video, error) {
+	rows, err := c.db.QueryContext(ctx,
+		`SELECT `+allVideoCols+` FROM videos WHERE COALESCE(hidden, 0) = 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Video
+	for rows.Next() {
+		v, err := scanVideo(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 // MigrateVideoToDrive 把 catalog 里 id=videoID 这条视频迁移到另一个 drive。
 // 用于 spider91 → PikPak 的迁移：上传成功后改写 drive_id / file_id /
 // content_hash，保留视频自身的 id（spider91-<driveID>-<sourceID>），这样
@@ -980,6 +1001,92 @@ func (c *Catalog) DeleteVideo(ctx context.Context, id string) error {
 	}
 
 	return tx.Commit()
+}
+
+// DeletedVideo 是黑名单（墓碑）表里的一条记录。原始视频行已删除，
+// 这里只保留扫盘去重和后台展示需要的最小字段；没有 title/封面/作者。
+type DeletedVideo struct {
+	ID        string `json:"id"`
+	DriveID   string `json:"driveId"`
+	FileID    string `json:"fileId"`
+	FileName  string `json:"fileName"`
+	Size      int64  `json:"size"`
+	DeletedAt int64  `json:"deletedAt"` // unix 毫秒
+}
+
+// ListDeletedVideos 分页列出黑名单视频，按拉黑时间倒序。
+// keyword 非空时按文件名模糊匹配。
+func (c *Catalog) ListDeletedVideos(ctx context.Context, keyword string, page, size int) ([]*DeletedVideo, int, error) {
+	if size <= 0 {
+		size = 50
+	}
+	if page <= 0 {
+		page = 1
+	}
+	var where []string
+	var args []any
+	if kw := strings.TrimSpace(keyword); kw != "" {
+		where = append(where, "file_name LIKE ?")
+		args = append(args, "%"+kw+"%")
+	}
+	whereSQL := ""
+	if len(where) > 0 {
+		whereSQL = " WHERE " + strings.Join(where, " AND ")
+	}
+
+	var total int
+	if err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM deleted_videos`+whereSQL, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * size
+	rows, err := c.db.QueryContext(ctx,
+		`SELECT id, COALESCE(drive_id, ''), COALESCE(file_id, ''), COALESCE(file_name, ''), COALESCE(size_bytes, 0), deleted_at
+		   FROM deleted_videos`+whereSQL+`
+		  ORDER BY deleted_at DESC
+		  LIMIT ? OFFSET ?`,
+		append(args, size, offset)...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var out []*DeletedVideo
+	for rows.Next() {
+		v := &DeletedVideo{}
+		if err := rows.Scan(&v.ID, &v.DriveID, &v.FileID, &v.FileName, &v.Size, &v.DeletedAt); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, v)
+	}
+	return out, total, rows.Err()
+}
+
+// RemoveDeletedVideo 把视频移出黑名单（删除墓碑）。移除后该视频会在
+// 下次扫盘/凌晨流水线时被重新发现并入库，本函数不主动触发扫描。
+func (c *Catalog) RemoveDeletedVideo(ctx context.Context, id string) error {
+	res, err := c.db.ExecContext(ctx, `DELETE FROM deleted_videos WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// VideoManagementCounts 返回后台视频管理两个标签的计数：
+// current=当前可见（与「当前视频」页一致的去重+在线盘+hidden=0 口径），
+// blacklisted=黑名单墓碑总数。
+func (c *Catalog) VideoManagementCounts(ctx context.Context) (current, blacklisted int, err error) {
+	currentSQL := `SELECT COUNT(*) FROM videos WHERE COALESCE(hidden, 0) = 0 AND ` + activeDriveWhereSQL + ` AND ` + uniqueVideoWhereSQL
+	if err = c.db.QueryRowContext(ctx, currentSQL).Scan(&current); err != nil {
+		return 0, 0, err
+	}
+	if err = c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM deleted_videos`).Scan(&blacklisted); err != nil {
+		return 0, 0, err
+	}
+	return current, blacklisted, nil
 }
 
 func (c *Catalog) IsVideoDeleted(ctx context.Context, id string) (bool, error) {

@@ -191,10 +191,14 @@ func (a *AdminServer) Register(r chi.Router) {
 
 			// 视频
 			r.Get("/videos", a.handleAdminListVideos)
+			r.Get("/videos/stats", a.handleVideoStats)
 			r.Put("/videos/{id}", a.handleUpdateVideo)
 			r.Delete("/videos/{id}", a.handleDeleteVideo)
 			r.Post("/videos/regen-preview", a.handleRegenAllPreviews)
 			r.Post("/videos/{id}/regen-preview", a.handleRegenPreview)
+			// 黑名单（被拉黑/手动删除、扫盘不再入库的视频）
+			r.Get("/blacklist", a.handleListBlacklist)
+			r.Delete("/blacklist/{id}", a.handleRemoveBlacklist)
 
 			// 标签
 			r.Get("/tags", a.handleListTags)
@@ -1884,6 +1888,57 @@ func (a *AdminServer) handleAdminListVideos(w http.ResponseWriter, r *http.Reque
 		"page":  page,
 		"size":  size,
 	})
+}
+
+// handleVideoStats 返回后台视频管理两个标签页的计数（当前/拉黑）。
+func (a *AdminServer) handleVideoStats(w http.ResponseWriter, r *http.Request) {
+	current, blacklisted, err := a.Catalog.VideoManagementCounts(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"current":     current,
+		"blacklisted": blacklisted,
+	})
+}
+
+// handleListBlacklist 分页返回黑名单（墓碑）视频。
+func (a *AdminServer) handleListBlacklist(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	page, _ := strconv.Atoi(q.Get("page"))
+	size, _ := strconv.Atoi(q.Get("size"))
+	if page <= 0 {
+		page = 1
+	}
+	if size <= 0 || size > 100 {
+		size = 100
+	}
+	items, total, err := a.Catalog.ListDeletedVideos(r.Context(), q.Get("keyword"), page, size)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": items,
+		"total": total,
+		"page":  page,
+		"size":  size,
+	})
+}
+
+// handleRemoveBlacklist 把视频移出黑名单（删除墓碑），下次扫盘会重新入库。
+func (a *AdminServer) handleRemoveBlacklist(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := a.Catalog.RemoveDeletedVideo(r.Context(), id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeErr(w, http.StatusNotFound, err)
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (a *AdminServer) handleListTags(w http.ResponseWriter, r *http.Request) {
