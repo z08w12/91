@@ -451,6 +451,10 @@ type VideoMetaPatch struct {
 	Category               string
 	ContentHash            string
 	FileName               string
+	Title                  string
+	TitleSet               bool
+	Author                 string
+	AuthorSet              bool
 	Tags                   []string
 	TagsSet                bool
 }
@@ -499,6 +503,14 @@ func (c *Catalog) UpdateVideoMeta(ctx context.Context, id string, p VideoMetaPat
 	if p.FileName != "" {
 		parts = append(parts, "file_name = ?")
 		args = append(args, p.FileName)
+	}
+	if p.TitleSet {
+		parts = append(parts, "title = ?")
+		args = append(args, p.Title)
+	}
+	if p.AuthorSet {
+		parts = append(parts, "author = ?")
+		args = append(args, p.Author)
 	}
 	if p.TagsSet {
 		tagsJSON, _ := json.Marshal(p.Tags)

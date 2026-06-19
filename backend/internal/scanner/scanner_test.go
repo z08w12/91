@@ -323,6 +323,67 @@ func TestRunDoesNotBackfillRemoteThumbnailForExistingVideo(t *testing.T) {
 	}
 }
 
+func TestRunSyncsRenamedExistingVideoMetadata(t *testing.T) {
+	ctx := context.Background()
+	cat, err := catalog.Open(t.TempDir() + "/catalog.db")
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := cat.Close(); err != nil {
+			t.Fatalf("close catalog: %v", err)
+		}
+	})
+
+	now := time.Now()
+	if err := cat.UpsertVideo(ctx, &catalog.Video{
+		ID:            "fake-drive-file-1",
+		DriveID:       "drive",
+		FileID:        "file-1",
+		FileName:      "old-name - Old Author.mp4",
+		Title:         "old-name",
+		Author:        "Old Author",
+		PreviewStatus: "pending",
+		PublishedAt:   now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatalf("seed video: %v", err)
+	}
+
+	drv := &scannerFakeDrive{
+		entries: []drives.Entry{{
+			ID:      "file-1",
+			Name:    "[4K] renamed clip.mp4",
+			Size:    123,
+			ModTime: now,
+		}},
+	}
+	sc := New(cat, drv, []string{".mp4"}, nil, nil)
+
+	stats, err := sc.Run(ctx, "")
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if stats.Added != 0 {
+		t.Fatalf("added = %d, want existing video to be updated in place", stats.Added)
+	}
+
+	got, err := cat.GetVideo(ctx, "fake-drive-file-1")
+	if err != nil {
+		t.Fatalf("get video: %v", err)
+	}
+	if got.FileName != "[4K] renamed clip.mp4" {
+		t.Fatalf("file_name = %q, want remote name", got.FileName)
+	}
+	if got.Title != "renamed clip" {
+		t.Fatalf("title = %q, want parsed title from remote name", got.Title)
+	}
+	if got.Author != "" {
+		t.Fatalf("author = %q, want cleared author from remote name without author suffix", got.Author)
+	}
+}
+
 func TestRunReplacesExistingVideoTagsWithFixedFilenameTags(t *testing.T) {
 	ctx := context.Background()
 	cat, err := catalog.Open(t.TempDir() + "/catalog.db")
