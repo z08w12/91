@@ -28,6 +28,17 @@ test("mobile menu links fill the full expanded menu row", () => {
   assert.match(openBody, /width\s*:\s*100%/);
 });
 
+test("main nav keeps tap targets below the iOS PWA status area", () => {
+  const navBody = ruleBody(navigationCss, ".main-nav");
+  assert.match(navBody, /padding-top\s*:\s*env\(safe-area-inset-top,\s*0px\)/);
+
+  const openListBody = ruleBody(navigationCss, ".main-nav.is-open .main-nav__list");
+  assert.match(
+    openListBody,
+    /top\s*:\s*calc\(64px\s*\+\s*env\(safe-area-inset-top,\s*0px\)\)/
+  );
+});
+
 test("top bar does not render inactive public auth links", () => {
   assert.doesNotMatch(topBarSource, /href="#(?:register|login)"/);
   assert.doesNotMatch(topBarSource, />\s*(?:注册|登录)\s*</);

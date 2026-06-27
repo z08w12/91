@@ -10,6 +10,7 @@
   position: sticky;
   top: 0;
   z-index: var(--z-nav);
+  padding-top: env(safe-area-inset-top, 0px);
   background: var(--glass-nav);
   border-bottom: 1px solid var(--border-subtle);
   backdrop-filter: saturate(160%) blur(16px);
@@ -220,7 +221,7 @@
   .main-nav.is-open .main-nav__list {
     display: flex;
     position: absolute;
-    top: 64px;
+    top: calc(64px + env(safe-area-inset-top, 0px));
     left: var(--space-3);
     right: var(--space-3);
     flex-direction: column;
