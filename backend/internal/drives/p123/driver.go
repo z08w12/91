@@ -29,8 +29,8 @@ import (
 const (
 	Kind = "p123"
 
-	defaultMainAPIBase  = "https://www.123pan.com/b/api"
-	defaultLoginAPIBase = "https://login.123pan.com/api"
+	defaultMainAPIBase  = "https://api.123278.com/b/api"
+	defaultLoginAPIBase = "https://api.123278.com/b/api"
 	defaultReferer      = "https://www.123pan.com/"
 	defaultPlatform     = "web"
 	defaultAppVersion   = "3"
