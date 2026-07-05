@@ -9,7 +9,7 @@ test("admin videos page uses responsive page size", () => {
   assert.match(videosPageSource, /const MOBILE_VIDEOS_PAGE_SIZE = 20;/);
   assert.match(videosPageSource, /const VIDEOS_MOBILE_QUERY = "\(max-width: 640px\)";/);
   assert.match(videosPageSource, /window\.matchMedia\(VIDEOS_MOBILE_QUERY\)/);
-  assert.match(videosPageSource, /api\.listVideos\(\{ driveId, page, size: pageSize, keyword: searchKeyword \}\)/);
+  assert.match(videosPageSource, /api\.listVideos\(\{ page, size: pageSize, keyword: searchKeyword \}\)/);
 });
 
 test("admin videos batch delete runs deletions sequentially", () => {
@@ -21,11 +21,13 @@ test("admin videos batch delete runs deletions sequentially", () => {
   );
 });
 
-test("admin videos show generating status after preview regeneration is accepted", () => {
+test("admin videos track preview regeneration after it is accepted", () => {
   assert.match(videosPageSource, /const REGEN_PREVIEW_STATUS = "generating";/);
   assert.match(videosPageSource, /const \[regenPreviewById, setRegenPreviewById\]/);
   assert.match(videosPageSource, /trackRegeneratingPreview\(\[v\]\)/);
-  assert.match(videosPageSource, /<PreviewStatus s=\{isPreviewGenerating\(v\) \? REGEN_PREVIEW_STATUS : v\.previewStatus\} \/>/);
+  assert.doesNotMatch(videosPageSource, /data-label="预览视频"[\s\S]*?<PreviewStatus/);
+  assert.match(videosPageSource, /onRegenPreview=\{\(\) => handleRegen\(editingVideo\)\}/);
+  assert.match(videosPageSource, /className="admin-btn admin-video-preview-control__button"/);
   assert.match(videosPageSource, /refreshListOnly\(\)/);
 });
 
@@ -34,5 +36,6 @@ test("admin videos keep generating status after page refresh", () => {
   assert.match(videosPageSource, /if \(trackedRegenCount === 0 && !hasGeneratingPreview\) return;/);
   assert.match(videosPageSource, /function isPreviewGenerating\(v: api\.AdminVideo\)/);
   assert.match(videosPageSource, /return !!regenPreviewById\[v\.id\] \|\| v\.previewStatus === REGEN_PREVIEW_STATUS;/);
-  assert.match(videosPageSource, /disabled=\{isPreviewGenerating\(v\)\}/);
+  assert.match(videosPageSource, /previewGenerating=\{isPreviewGenerating\(editingVideo\)\}/);
+  assert.match(videosPageSource, /disabled=\{saving \|\| previewBusy\}/);
 });

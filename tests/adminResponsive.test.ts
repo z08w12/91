@@ -126,19 +126,14 @@ test("mobile user management cards keep identity, metadata, and actions separate
   assert.match(ipActions, /display\s*:\s*block/);
 });
 
-test("admin video filter select uses an aligned custom arrow", () => {
-  const select = allRuleBodies(adminCss, ".admin-videos-filter__select");
-  const icon = allRuleBodies(adminCss, ".admin-videos-filter__select-icon");
-  const focus = ruleBody(adminCss, ".admin-videos-filter__select:focus");
-  const mobileWrap = ruleBodyByContains(mobileCss(), ".admin-videos-filter__select-wrap");
-
-  assert.match(select, /appearance\s*:\s*none/);
-  assert.match(select, /padding\s*:\s*0\s+36px\s+0\s+var\(--space-3\)/);
-  assert.match(icon, /top\s*:\s*50%/);
-  assert.match(icon, /right\s*:\s*12px/);
-  assert.match(icon, /transform\s*:\s*translateY\(-50%\)/);
-  assert.match(focus, /box-shadow\s*:\s*0\s+0\s+0\s+3px\s+var\(--accent-soft\)/);
-  assert.match(mobileWrap, /flex\s*:\s*1\s+1\s+100%/);
+test("admin video management omits drive filters and page title", () => {
+  assert.doesNotMatch(videosPageSource, /function DriveFilter/);
+  assert.doesNotMatch(videosPageSource, /admin-videos-filter__select/);
+  assert.doesNotMatch(videosPageSource, /<h1 className="admin-page__title">视频管理<\/h1>/);
+  assert.doesNotMatch(videosPageSource, /const \[driveId, setDriveId\]/);
+  assert.doesNotMatch(videosPageSource, /getVideoStats|admin-video-tab__count/);
+  assert.doesNotMatch(adminCss, /admin-videos-filter__select/);
+  assert.doesNotMatch(adminCss, /admin-video-tab__count/);
 });
 
 test("admin video bulk actions use semantic theme colors", () => {
@@ -272,12 +267,16 @@ test("desktop current video list uses long cards without a header row", () => {
   assert.doesNotMatch(videosPageSource, /<th>作者<\/th>/);
   assert.doesNotMatch(videosPageSource, /<th>时长<\/th>/);
   assert.doesNotMatch(videosPageSource, /<th>预览视频<\/th>/);
+  assert.doesNotMatch(videosPageSource, /data-label="预览视频"[\s\S]*?<PreviewStatus/);
   assert.match(table, /display\s*:\s*block/);
+  assert.match(table, /width\s*:\s*min\(100%,\s*780px\)/);
+  assert.match(table, /margin-inline\s*:\s*auto/);
   assert.match(table, /background\s*:\s*transparent/);
   assert.match(body, /display\s*:\s*grid/);
   assert.match(body, /gap\s*:\s*10px/);
   assert.match(row, /display\s*:\s*grid/);
-  assert.match(row, /grid-template-columns\s*:\s*[\s\S]*minmax\(320px,\s*1\.55fr\)/);
+  assert.match(row, /grid-template-columns\s*:\s*[\s\S]*minmax\(280px,\s*1fr\)/);
+  assert.doesNotMatch(row, /minmax\(96px/);
   assert.match(row, /min-height\s*:\s*80px/);
   assert.match(row, /border-radius\s*:\s*8px/);
   assert.match(selected, /background\s*:\s*var\(--accent-soft\)/);
@@ -287,43 +286,55 @@ test("desktop current video list uses long cards without a header row", () => {
   assert.match(thumb, /width\s*:\s*96px/);
   assert.match(thumb, /height\s*:\s*54px/);
   assert.match(actions, /justify-content\s*:\s*flex-end/);
+  assert.match(adminCss, /\.admin-videos-current \.admin-videos-table \.admin-video-title-tags,[\s\S]*display\s*:\s*none/);
+  assert.match(adminCss, /\.admin-videos-current \.admin-videos-table td\[data-label="作者"\],[\s\S]*display\s*:\s*none/);
+  assert.match(adminCss, /\.admin-videos-current \.admin-videos-table td\[data-label="时长"\],[\s\S]*display\s*:\s*none/);
+  assert.match(adminCss, /\.admin-videos-current \.admin-videos-table td\[data-label="来源"\][\s\S]*display\s*:\s*none/);
 });
 
-test("desktop video management filters use a stable three-column toolbar", () => {
+test("desktop video management toolbar follows tag management layout", () => {
   const css = adminCss;
   const currentFilter = ruleBodyByContains(css, ".admin-videos-filter--current");
   const blacklistFilter = ruleBodyByContains(css, ".admin-videos-filter--blacklist");
-  const currentFilterSelect = ruleBodyByContains(css, ".admin-videos-filter--current .admin-videos-filter__select-wrap");
-  const blacklistFilterSelect = ruleBodyByContains(css, ".admin-videos-filter--blacklist .admin-videos-filter__select-wrap");
-  const currentSelect = ruleBodyByContains(css, ".admin-videos-filter--current .admin-videos-filter__select");
-  const blacklistSelect = ruleBodyByContains(css, ".admin-videos-filter--blacklist .admin-videos-filter__select");
-  const currentIcon = ruleBodyByContains(css, ".admin-videos-filter--current .admin-videos-filter__select-icon");
-  const blacklistIcon = ruleBodyByContains(css, ".admin-videos-filter--blacklist .admin-videos-filter__select-icon");
   const currentFilterSearch = ruleBodyByContains(css, ".admin-videos-filter--current .admin-videos-filter__search");
   const blacklistFilterSearch = ruleBodyByContains(css, ".admin-videos-filter--blacklist .admin-videos-filter__search");
+  const searchInput = ruleBody(css, ".admin-videos-filter__search input");
   const batch = ruleBody(css, ".admin-videos-filter__batch");
+  const tabs = ruleBody(css, ".admin-video-tabs");
+  const tab = ruleBody(css, ".admin-video-tab");
+  const activeTab = ruleBody(css, ".admin-video-tab.is-active");
 
   assert.doesNotMatch(videosPageSource, /aria-label="刷新当前视频"/);
   assert.doesNotMatch(videosPageSource, /aria-label="刷新拉黑视频"/);
   assert.match(videosPageSource, /admin-videos-filter__batch/);
+  assert.doesNotMatch(videosPageSource, /CheckSquare/);
   assert.match(currentFilter, /display\s*:\s*grid/);
-  assert.match(currentFilter, /grid-template-columns\s*:\s*72px\s+minmax\(0,\s*1fr\)\s+auto/);
+  assert.match(currentFilter, /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)\s+minmax\(240px,\s*360px\)\s+minmax\(0,\s*1fr\)/);
   assert.match(currentFilter, /width\s*:\s*100%/);
   assert.match(blacklistFilter, /display\s*:\s*grid/);
-  assert.match(blacklistFilter, /grid-template-columns\s*:\s*72px\s+minmax\(0,\s*1fr\)\s+auto/);
+  assert.match(blacklistFilter, /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)\s+minmax\(240px,\s*360px\)\s+minmax\(0,\s*1fr\)/);
   assert.match(blacklistFilter, /width\s*:\s*100%/);
-  assert.match(currentFilterSelect, /min-width\s*:\s*0/);
-  assert.match(blacklistFilterSelect, /min-width\s*:\s*0/);
-  assert.match(currentSelect, /padding\s*:\s*0\s+4px/);
-  assert.match(blacklistSelect, /padding\s*:\s*0\s+4px/);
-  assert.match(currentSelect, /text-align\s*:\s*center/);
-  assert.match(blacklistSelect, /text-align\s*:\s*center/);
-  assert.match(currentIcon, /display\s*:\s*none/);
-  assert.match(blacklistIcon, /display\s*:\s*none/);
+  assert.match(videosPageSource, /admin-videos-filter--current[\s\S]*?\{tabSelector\}/);
+  assert.match(videosPageSource, /admin-videos-filter--blacklist[\s\S]*?\{tabSelector\}/);
   assert.match(currentFilterSearch, /min-width\s*:\s*0/);
+  assert.match(currentFilterSearch, /grid-column\s*:\s*2/);
+  assert.match(currentFilterSearch, /max-width\s*:\s*360px/);
   assert.match(blacklistFilterSearch, /min-width\s*:\s*0/);
+  assert.match(blacklistFilterSearch, /grid-column\s*:\s*2/);
+  assert.match(blacklistFilterSearch, /max-width\s*:\s*360px/);
+  assert.match(searchInput, /padding\s*:\s*8px\s+12px\s+8px\s+32px/);
+  assert.match(searchInput, /background\s*:\s*var\(--bg-surface\)/);
+  assert.match(batch, /grid-column\s*:\s*3/);
+  assert.match(batch, /justify-self\s*:\s*end/);
   assert.match(batch, /white-space\s*:\s*nowrap/);
   assert.doesNotMatch(batch, /display\s*:\s*none/);
+  assert.match(tabs, /background\s*:\s*var\(--bg-sunken\)/);
+  assert.match(tabs, /padding\s*:\s*3px/);
+  assert.match(tabs, /border-radius\s*:\s*var\(--radius-sm\)/);
+  assert.match(tab, /padding\s*:\s*6px\s+12px/);
+  assert.match(tab, /font-size\s*:\s*var\(--font-xs\)/);
+  assert.match(activeTab, /background\s*:\s*var\(--bg-surface\)/);
+  assert.match(activeTab, /color\s*:\s*var\(--accent\)/);
 });
 
 test("admin table action headers center-align with action buttons", () => {
@@ -338,10 +349,10 @@ test("blacklist restore action uses a light button style", () => {
   const restoreButton = ruleBody(adminCss, ".admin-blacklist-restore-btn");
   const unavailable = ruleBody(adminCss, ".admin-blacklist-unavailable");
 
-  assert.match(videosPageSource, /const \[driveId, setDriveId\] = useState\(""\);/);
-  assert.match(videosPageSource, /api\.listBlacklist\(\{ driveId, page, size: pageSize, keyword: searchKeyword \}\)/);
+  assert.doesNotMatch(videosPageSource, /const \[driveId, setDriveId\] = useState\(""\);/);
+  assert.match(videosPageSource, /api\.listBlacklist\(\{ page, size: pageSize, keyword: searchKeyword \}\)/);
   assert.match(videosPageSource, /admin-videos-filter admin-videos-filter--blacklist/);
-  assert.match(videosPageSource, /<DriveFilter drives=\{drives\} driveId=\{driveId\}/);
+  assert.doesNotMatch(videosPageSource, /<DriveFilter/);
   assert.match(apiSource, /listBlacklist\(\s*params: \{ driveId\?: string; page\?: number; size\?: number; keyword\?: string \}/);
   assert.match(apiSource, /if \(params\.driveId\) qs\.set\("driveId", params\.driveId\);/);
   assert.match(videosPageSource, /className="admin-btn admin-blacklist-restore-btn"/);
@@ -406,13 +417,9 @@ test("admin video management controls wrap instead of covering text on mobile", 
   const paginationInfo = allRuleBodies(css, ".admin-table-pagination__info");
   const currentFilter = ruleBody(css, ".admin-videos-filter--current");
   const currentFilterField = ruleBodyByContains(css, ".admin-videos-filter--current .admin-videos-filter__search");
-  const currentFilterSelect = ruleBody(css, ".admin-videos-filter--current .admin-videos-filter__select");
-  const currentFilterIcon = ruleBody(css, ".admin-videos-filter--current .admin-videos-filter__select-icon");
   const currentFilterBatch = ruleBodyByContains(css, ".admin-videos-filter--current .admin-videos-filter__batch");
   const blacklistFilter = allRuleBodies(css, ".admin-videos-filter--blacklist");
   const blacklistFilterField = ruleBodyByContains(css, ".admin-videos-filter--blacklist .admin-videos-filter__search");
-  const blacklistFilterSelect = ruleBodyByContains(css, ".admin-videos-filter--blacklist .admin-videos-filter__select");
-  const blacklistFilterIcon = ruleBodyByContains(css, ".admin-videos-filter--blacklist .admin-videos-filter__select-icon");
   const blacklistFilterBatch = ruleBodyByContains(css, ".admin-videos-filter--blacklist .admin-videos-filter__batch");
   const bulkToolbar = ruleBodyByContains(css, ".admin-videos-current .admin-videos-list-toolbar");
   const blacklistBulkToolbar = ruleBodyByContains(css, ".admin-blacklist-bulk-toolbar");
@@ -447,22 +454,13 @@ test("admin video management controls wrap instead of covering text on mobile", 
 
   assert.match(paginationInfo, /flex\s*:\s*1\s+0\s+100%/);
   assert.match(currentFilter, /display\s*:\s*grid/);
-  assert.match(currentFilter, /grid-template-columns\s*:\s*72px\s+minmax\(0,\s*1fr\)\s+auto/);
+  assert.match(currentFilter, /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)\s+auto/);
   assert.match(currentFilterField, /min-width\s*:\s*0/);
-  assert.match(currentFilterSelect, /padding\s*:\s*0\s+4px/);
-  assert.match(currentFilterSelect, /text-align\s*:\s*center/);
-  assert.match(currentFilterSelect, /text-align-last\s*:\s*center/);
-  assert.match(currentFilterSelect, /text-overflow\s*:\s*ellipsis/);
-  assert.match(currentFilterIcon, /display\s*:\s*none/);
   assert.match(currentFilterBatch, /min-width\s*:\s*54px/);
   assert.match(currentFilterBatch, /white-space\s*:\s*nowrap/);
   assert.match(blacklistFilter, /display\s*:\s*grid/);
-  assert.match(blacklistFilter, /grid-template-columns\s*:\s*72px\s+minmax\(0,\s*1fr\)\s+auto/);
+  assert.match(blacklistFilter, /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)\s+auto/);
   assert.match(blacklistFilterField, /min-width\s*:\s*0/);
-  assert.match(blacklistFilterSelect, /padding\s*:\s*0\s+4px/);
-  assert.match(blacklistFilterSelect, /text-align\s*:\s*center/);
-  assert.match(blacklistFilterSelect, /text-align-last\s*:\s*center/);
-  assert.match(blacklistFilterIcon, /display\s*:\s*none/);
   assert.match(blacklistFilterBatch, /white-space\s*:\s*nowrap/);
   assert.match(bulkToolbar, /position\s*:\s*fixed/);
   assert.match(bulkToolbar, /bottom\s*:\s*calc\(var\(--space-3\)\s*\+\s*env\(safe-area-inset-bottom\)\)/);
@@ -513,11 +511,8 @@ test("mobile video management uses compact theme-aware video cards", () => {
   const authorColumn = ruleBodyByContains(css, ".admin-videos-table:not(.admin-drives-table) td[data-label=\"作者\"]");
   const sourceColumn = ruleBodyByContains(css, ".admin-videos-table:not(.admin-drives-table) td[data-label=\"来源\"]");
   const durationColumn = ruleBodyByContains(css, ".admin-videos-table:not(.admin-drives-table) td[data-label=\"时长\"]");
-  const previewColumn = ruleBodyByContains(css, ".admin-videos-table:not(.admin-drives-table) td[data-label=\"预览视频\"]");
   const actions = ruleBody(css, ".admin-videos-table:not(.admin-drives-table) td.is-actions");
   const actionsLabel = ruleBody(css, ".admin-videos-table:not(.admin-drives-table) td.is-actions::before");
-  const status = ruleBody(css, ".admin-videos-table:not(.admin-drives-table) .admin-status");
-  const statusDot = ruleBody(css, ".admin-videos-table:not(.admin-drives-table) .admin-status::before");
   const actionButton = ruleBody(css, ".admin-videos-table:not(.admin-drives-table) td.is-actions .admin-btn");
   const dangerButton = ruleBody(css, ".admin-videos-table:not(.admin-drives-table) td.is-actions .admin-btn.is-danger");
 
@@ -547,23 +542,20 @@ test("mobile video management uses compact theme-aware video cards", () => {
   assert.doesNotMatch(css, /admin-video-card-category/);
   assert.match(authorColumn, /display\s*:\s*none/);
   assert.match(sourceColumn, /grid-row\s*:\s*2/);
-  assert.match(sourceColumn, /grid-column\s*:\s*1\s*\/\s*5/);
+  assert.match(sourceColumn, /grid-column\s*:\s*1\s*\/\s*7/);
   assert.match(sourceColumn, /justify-items\s*:\s*start/);
   assert.match(sourceColumn, /text-overflow\s*:\s*ellipsis/);
   assert.match(durationColumn, /grid-row\s*:\s*2/);
-  assert.match(durationColumn, /grid-column\s*:\s*5\s*\/\s*9/);
-  assert.match(durationColumn, /justify-items\s*:\s*center/);
-  assert.match(previewColumn, /grid-row\s*:\s*2/);
-  assert.match(previewColumn, /grid-column\s*:\s*9\s*\/\s*-1/);
-  assert.match(previewColumn, /justify-items\s*:\s*end/);
+  assert.match(durationColumn, /grid-column\s*:\s*7\s*\/\s*-1/);
+  assert.match(durationColumn, /justify-items\s*:\s*end/);
+  assert.doesNotMatch(videosPageSource, /data-label="预览视频"[\s\S]*?<PreviewStatus/);
+  assert.doesNotMatch(css, /\.admin-videos-table:not\(\.admin-drives-table\) td\[data-label="预览视频"\]/);
   assert.match(actions, /grid-column\s*:\s*1\s*\/\s*-1/);
   assert.match(actions, /grid-row\s*:\s*3/);
   assert.match(actions, /display\s*:\s*grid/);
-  assert.match(actions, /grid-template-columns\s*:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(actions, /grid-template-columns\s*:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
   assert.match(actions, /gap\s*:\s*10px/);
   assert.match(actionsLabel, /content\s*:\s*none/);
-  assert.match(status, /gap\s*:\s*0/);
-  assert.match(statusDot, /content\s*:\s*none/);
   assert.doesNotMatch(sourceColumn, /border-left/);
   assert.match(actionButton, /width\s*:\s*100%/);
   assert.match(actionButton, /height\s*:\s*32px/);

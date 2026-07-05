@@ -1,11 +1,9 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
-  ChevronDown,
   Edit,
   RefreshCw,
   Search,
-  CheckSquare,
   Image,
   Trash2,
   Ban,
@@ -39,26 +37,12 @@ const TABS: { key: TabKey; label: string }[] = [
 
 /**
  * 视频管理容器：顶部分段标签在「当前 / 拉黑」两个视图间切换，
- * 激活标签同步到 URL ?tab=，标签上的计数来自 /videos/stats。
+ * 激活标签同步到 URL ?tab=。
  */
 export function VideosPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const rawTab = searchParams.get("tab");
   const activeTab: TabKey = rawTab === "blacklist" ? "blacklist" : "current";
-  const [stats, setStats] = useState<api.VideoStats | null>(null);
-
-  async function refreshStats() {
-    try {
-      setStats(await api.getVideoStats());
-    } catch {
-      // 计数仅用于标签徽标，失败不阻塞主流程。
-    }
-  }
-
-  useEffect(() => {
-    refreshStats();
-  }, []);
-
   function selectTab(key: TabKey) {
     setSearchParams(
       (prev) => {
@@ -71,51 +55,60 @@ export function VideosPage() {
     );
   }
 
-  const counts: Record<TabKey, number | undefined> = {
-    current: stats?.current,
-    blacklist: stats?.blacklisted,
-  };
-
   return (
     <section>
-      <header className="admin-page__header">
-        <h1 className="admin-page__title">视频管理</h1>
-      </header>
-
-      <div className="admin-video-tabs" role="tablist" aria-label="视频管理标签页">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            role="tab"
-            aria-selected={activeTab === t.key}
-            className={`admin-video-tab ${activeTab === t.key ? "is-active" : ""}`}
-            onClick={() => selectTab(t.key)}
-          >
-            <span>{t.label}</span>
-            {counts[t.key] !== undefined && (
-              <span className="admin-video-tab__count">{counts[t.key]}</span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      {activeTab === "current" && <CurrentVideosTab onStatsChanged={refreshStats} />}
-      {activeTab === "blacklist" && <BlacklistTab onStatsChanged={refreshStats} />}
+      {activeTab === "current" && (
+        <CurrentVideosTab
+          tabSelector={<VideoTabSelector activeTab={activeTab} onSelect={selectTab} />}
+        />
+      )}
+      {activeTab === "blacklist" && (
+        <BlacklistTab
+          tabSelector={<VideoTabSelector activeTab={activeTab} onSelect={selectTab} />}
+        />
+      )}
     </section>
+  );
+}
+
+function VideoTabSelector({
+  activeTab,
+  onSelect,
+}: {
+  activeTab: TabKey;
+  onSelect: (key: TabKey) => void;
+}) {
+  return (
+    <div className="admin-video-tabs" role="tablist" aria-label="视频管理标签页">
+      {TABS.map((t) => (
+        <button
+          key={t.key}
+          type="button"
+          role="tab"
+          aria-selected={activeTab === t.key}
+          className={`admin-video-tab ${activeTab === t.key ? "is-active" : ""}`}
+          onClick={() => onSelect(t.key)}
+        >
+          <span>{t.label}</span>
+        </button>
+      ))}
+    </div>
   );
 }
 
 // ---------- 当前视频 ----------
 
-function CurrentVideosTab({ onStatsChanged }: { onStatsChanged: () => void }) {
+function CurrentVideosTab({
+  tabSelector,
+}: {
+  tabSelector: ReactNode;
+}) {
   const [list, setList] = useState<api.AdminVideo[]>([]);
   const [drives, setDrives] = useState<api.AdminDrive[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [keyword, setKeyword] = useState("");
   const [searchKeyword, setSearchKeyword] = useState("");
-  const [driveId, setDriveId] = useState("");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [editing, setEditing] = useState<api.AdminVideo | null>(null);
@@ -139,7 +132,7 @@ function CurrentVideosTab({ onStatsChanged }: { onStatsChanged: () => void }) {
     setLoadError("");
     try {
       const [r, tagList, driveList] = await Promise.all([
-        api.listVideos({ driveId, page, size: pageSize, keyword: searchKeyword }),
+        api.listVideos({ page, size: pageSize, keyword: searchKeyword }),
         api.listTags(),
         api.listDrives(),
       ]);
@@ -159,7 +152,7 @@ function CurrentVideosTab({ onStatsChanged }: { onStatsChanged: () => void }) {
 
   async function refreshListOnly() {
     try {
-      const r = await api.listVideos({ driveId, page, size: pageSize, keyword: searchKeyword });
+      const r = await api.listVideos({ page, size: pageSize, keyword: searchKeyword });
       setList(r.items ?? []);
       setTotal(r.total ?? 0);
     } catch {
@@ -172,7 +165,7 @@ function CurrentVideosTab({ onStatsChanged }: { onStatsChanged: () => void }) {
 
   useEffect(() => {
     refresh();
-  }, [driveId, page, searchKeyword, pageSize]);
+  }, [page, searchKeyword, pageSize]);
 
   useEffect(() => {
     setPage(1);
@@ -193,7 +186,7 @@ function CurrentVideosTab({ onStatsChanged }: { onStatsChanged: () => void }) {
       refreshListOnly();
     }, REGEN_PREVIEW_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [trackedRegenCount, hasGeneratingPreview, driveId, page, pageSize, searchKeyword]);
+  }, [trackedRegenCount, hasGeneratingPreview, page, pageSize, searchKeyword]);
 
   useEffect(() => {
     if (trackedRegenCount === 0) return;
@@ -217,6 +210,7 @@ function CurrentVideosTab({ onStatsChanged }: { onStatsChanged: () => void }) {
   const driveNameMap = new Map(drives.map((d) => [d.id, d.name || d.id]));
 
   const listItems = list;
+  const editingVideo = editing ? (listItems.find((v) => v.id === editing.id) ?? editing) : null;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   async function handleRegen(v: api.AdminVideo) {
@@ -301,7 +295,6 @@ function CurrentVideosTab({ onStatsChanged }: { onStatsChanged: () => void }) {
         return next;
       });
       show(result.deletedSource ? "已删除视频，并清理源文件" : "已删除视频", "success");
-      onStatsChanged();
       if (listItems.length === 1 && page > 1) {
         setPage((p) => Math.max(1, p - 1));
       } else {
@@ -344,7 +337,6 @@ function CurrentVideosTab({ onStatsChanged }: { onStatsChanged: () => void }) {
       setBatchDeleteOpen(false);
       setBatchDeleteSource(false);
       setSelectMode(false);
-      onStatsChanged();
       if (success >= listItems.length && page > 1) {
         setPage((p) => Math.max(1, p - 1));
       } else {
@@ -376,7 +368,6 @@ function CurrentVideosTab({ onStatsChanged }: { onStatsChanged: () => void }) {
   return (
     <div className={`admin-videos-current${selectedIds.size > 0 ? " has-bulk-actions" : ""}`}>
       <div className="admin-page__actions admin-videos-filter admin-videos-filter--current">
-        <DriveFilter drives={drives} driveId={driveId} onChange={(id) => { setDriveId(id); setPage(1); }} />
         <SearchBox keyword={keyword} onChange={setKeyword} onSubmit={handleSearchSubmit} />
         <button
           type="button"
@@ -384,10 +375,10 @@ function CurrentVideosTab({ onStatsChanged }: { onStatsChanged: () => void }) {
           onClick={toggleSelectMode}
           aria-pressed={selectMode}
         >
-          <CheckSquare size={13} />
           <span>{selectMode ? "退出选择" : "批量选择"}</span>
         </button>
       </div>
+      {tabSelector}
 
       {!loading && selectedIds.size > 0 && (
         <div className="admin-videos-list-toolbar">
@@ -413,9 +404,7 @@ function CurrentVideosTab({ onStatsChanged }: { onStatsChanged: () => void }) {
             <Image size={48} />
           </div>
           <div className="admin-empty-state__text">
-            {driveId
-              ? "这个网盘下还没有可显示的视频，或未匹配到搜索结果。"
-              : "还没有视频。先在「网盘管理」里配置好盘并触发扫描，或调整搜索词。"}
+            还没有视频。先在「网盘管理」里配置好盘并触发扫描，或调整搜索词。
           </div>
         </div>
       ) : (
@@ -447,24 +436,12 @@ function CurrentVideosTab({ onStatsChanged }: { onStatsChanged: () => void }) {
                     </td>
                     <td data-label="作者">{v.author || <span className="admin-text-faint">—</span>}</td>
                     <td data-label="时长">{formatDur(v.durationSeconds)}</td>
-                    <td data-label="预览视频">
-                      <PreviewStatus s={isPreviewGenerating(v) ? REGEN_PREVIEW_STATUS : v.previewStatus} />
-                    </td>
                     <td data-label="来源" className="admin-mono-cell">
                       {driveNameMap.get(v.driveId) ?? v.driveId}
                     </td>
                     <td className="is-actions" data-label="操作">
                       <button type="button" className="admin-btn" onClick={() => setEditing(v)} title="编辑视频">
                         <Edit size={13} />
-                      </button>{" "}
-                      <button
-                        type="button"
-                        className="admin-btn"
-                        onClick={() => handleRegen(v)}
-                        disabled={isPreviewGenerating(v)}
-                        title={isPreviewGenerating(v) ? "预览视频正在生成" : "重生预览视频"}
-                      >
-                        <RefreshCw size={13} className={isPreviewGenerating(v) ? "admin-spin" : undefined} />
                       </button>{" "}
                       <button
                         type="button"
@@ -487,10 +464,12 @@ function CurrentVideosTab({ onStatsChanged }: { onStatsChanged: () => void }) {
         </>
       )}
 
-      {editing && (
+      {editingVideo && (
         <EditVideoModal
-          video={editing}
+          video={editingVideo}
           availableTags={availableTags}
+          previewGenerating={isPreviewGenerating(editingVideo)}
+          onRegenPreview={() => handleRegen(editingVideo)}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -553,14 +532,17 @@ function CurrentVideosTab({ onStatsChanged }: { onStatsChanged: () => void }) {
 
 // ---------- 拉黑视频 ----------
 
-function BlacklistTab({ onStatsChanged }: { onStatsChanged: () => void }) {
+function BlacklistTab({
+  tabSelector,
+}: {
+  tabSelector: ReactNode;
+}) {
   const [list, setList] = useState<api.AdminDeletedVideo[]>([]);
   const [drives, setDrives] = useState<api.AdminDrive[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [keyword, setKeyword] = useState("");
   const [searchKeyword, setSearchKeyword] = useState("");
-  const [driveId, setDriveId] = useState("");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [selectMode, setSelectMode] = useState(false);
@@ -580,7 +562,7 @@ function BlacklistTab({ onStatsChanged }: { onStatsChanged: () => void }) {
     setLoadError("");
     try {
       const [r, driveList] = await Promise.all([
-        api.listBlacklist({ driveId, page, size: pageSize, keyword: searchKeyword }),
+        api.listBlacklist({ page, size: pageSize, keyword: searchKeyword }),
         api.listDrives(),
       ]);
       setList(r.items ?? []);
@@ -598,7 +580,7 @@ function BlacklistTab({ onStatsChanged }: { onStatsChanged: () => void }) {
 
   useEffect(() => {
     refresh();
-  }, [driveId, page, searchKeyword, pageSize]);
+  }, [page, searchKeyword, pageSize]);
 
   useEffect(() => {
     let active = true;
@@ -632,7 +614,6 @@ function BlacklistTab({ onStatsChanged }: { onStatsChanged: () => void }) {
             : `源文件删除完成：成功 ${status.deleted}`,
           status.failed > 0 ? "info" : "success"
         );
-        onStatsChanged();
         void refresh();
       } catch {
         if (active) timer = window.setTimeout(poll, 2000);
@@ -676,7 +657,6 @@ function BlacklistTab({ onStatsChanged }: { onStatsChanged: () => void }) {
           : "已允许重新入库，将在下次手动或定时扫盘时生效",
         "success"
       );
-      onStatsChanged();
       if (list.length === 1 && page > 1) {
         setPage((p) => Math.max(1, p - 1));
       } else {
@@ -772,7 +752,6 @@ function BlacklistTab({ onStatsChanged }: { onStatsChanged: () => void }) {
   return (
     <div className={`admin-videos-blacklist${selectedIds.size > 0 ? " has-bulk-actions" : ""}`}>
       <div className="admin-page__actions admin-videos-filter admin-videos-filter--blacklist">
-        <DriveFilter drives={drives} driveId={driveId} onChange={(id) => { setDriveId(id); setPage(1); }} />
         <SearchBox keyword={keyword} onChange={setKeyword} onSubmit={handleSearchSubmit} placeholder="搜索文件名" />
         <button
           type="button"
@@ -780,10 +759,10 @@ function BlacklistTab({ onStatsChanged }: { onStatsChanged: () => void }) {
           onClick={toggleSelectMode}
           aria-pressed={selectMode}
         >
-          <CheckSquare size={13} />
           <span>{selectMode ? "退出选择" : "批量选择"}</span>
         </button>
       </div>
+      {tabSelector}
 
       {!loading && selectedIds.size > 0 && (
         <div className="admin-videos-list-toolbar admin-blacklist-bulk-toolbar">
@@ -1026,34 +1005,6 @@ function BlacklistTab({ onStatsChanged }: { onStatsChanged: () => void }) {
 
 // ---------- 共享小组件 ----------
 
-function DriveFilter({
-  drives,
-  driveId,
-  onChange,
-}: {
-  drives: api.AdminDrive[];
-  driveId: string;
-  onChange: (id: string) => void;
-}) {
-  return (
-    <div className="admin-videos-filter__select-wrap">
-      <select
-        className="admin-videos-filter__select"
-        value={driveId}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">全部网盘</option>
-        {drives.map((d) => (
-          <option key={d.id} value={d.id}>
-            {d.name || d.id}
-          </option>
-        ))}
-      </select>
-      <ChevronDown size={15} className="admin-videos-filter__select-icon" aria-hidden="true" />
-    </div>
-  );
-}
-
 function SearchBox({
   keyword,
   onChange,
@@ -1287,11 +1238,15 @@ function useVideosPageSize() {
 function EditVideoModal({
   video,
   availableTags,
+  previewGenerating,
+  onRegenPreview,
   onClose,
   onSaved,
 }: {
   video: api.AdminVideo;
   availableTags: api.AdminTag[];
+  previewGenerating: boolean;
+  onRegenPreview: () => Promise<void>;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -1302,6 +1257,7 @@ function EditVideoModal({
   const [description, setDescription] = useState(video.description ?? "");
   const [durationSec, setDurationSec] = useState(String(video.durationSeconds || 0));
   const [saving, setSaving] = useState(false);
+  const [regeningPreview, setRegeningPreview] = useState(false);
   const { show } = useToast();
 
   async function handleSave() {
@@ -1322,6 +1278,17 @@ function EditVideoModal({
       setSaving(false);
     }
   }
+
+  async function handleRegenPreview() {
+    setRegeningPreview(true);
+    try {
+      await onRegenPreview();
+    } finally {
+      setRegeningPreview(false);
+    }
+  }
+
+  const previewBusy = previewGenerating || regeningPreview;
 
   return (
     <Modal
@@ -1397,7 +1364,18 @@ function EditVideoModal({
           <dd>{fileMeta(video) || "—"}</dd>
           <dt>预览视频</dt>
           <dd>
-            <PreviewStatus s={video.previewStatus} />
+            <div className="admin-video-preview-control">
+              <PreviewStatus s={previewGenerating ? REGEN_PREVIEW_STATUS : video.previewStatus} />
+              <button
+                type="button"
+                className="admin-btn admin-video-preview-control__button"
+                onClick={handleRegenPreview}
+                disabled={saving || previewBusy}
+              >
+                <RefreshCw size={13} className={previewBusy ? "admin-spin" : undefined} />
+                {previewBusy ? "生成中..." : "重新生成预览"}
+              </button>
+            </div>
           </dd>
         </dl>
         <details className="admin-form__help" style={{ marginTop: 8 }}>
