@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Pencil, Tag, X } from "lucide-react";
 import type { TagItem, VideoDetail } from "@/types";
 
@@ -29,6 +30,8 @@ export function VideoInfoPanel({
   const [draftTags, setDraftTags] = useState<string[]>(video.tags ?? []);
   const [tagError, setTagError] = useState("");
   const [descExpanded, setDescExpanded] = useState(false);
+  const tagEditorTitleId = useId();
+  const tagEditorRef = useRef<HTMLDivElement | null>(null);
 
   const tags = video.tags ?? [];
   const description = (video.description ?? "").trim();
@@ -43,6 +46,29 @@ export function VideoInfoPanel({
       return a.label.localeCompare(b.label, "zh-Hans-CN");
     });
   }, [availableTags]);
+
+  useEffect(() => {
+    if (!editingTags) return;
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape" || tagSaving) return;
+      e.preventDefault();
+      closeTagEditor();
+    }
+
+    const focusTimer = window.setTimeout(() => {
+      const firstButton = tagEditorRef.current?.querySelector<HTMLButtonElement>(
+        "button:not(:disabled)"
+      );
+      (firstButton ?? tagEditorRef.current)?.focus();
+    }, 0);
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [editingTags, tagSaving]);
 
   function openTagEditor() {
     setDraftTags(tags);
@@ -65,6 +91,86 @@ export function VideoInfoPanel({
       setTagError(e instanceof Error ? e.message : "保存标签失败");
     }
   }
+
+  const tagEditor = editingTags
+    ? createPortal(
+        <div className="vd-tag-editor-modal" role="presentation">
+          <div
+            ref={tagEditorRef}
+            className="vd-tag-editor"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={tagEditorTitleId}
+            tabIndex={-1}
+          >
+            <header className="vd-tag-editor__head">
+              <span id={tagEditorTitleId}>选择适用的标签</span>
+              <button
+                type="button"
+                className="vd-tag-editor__close"
+                onClick={closeTagEditor}
+                disabled={tagSaving}
+                aria-label="关闭"
+              >
+                <X size={16} />
+              </button>
+            </header>
+
+            <div className="vd-tag-editor__grid">
+              {sortedAvailable.length === 0 ? (
+                <div className="vd-tag-editor__empty">暂无可用标签</div>
+              ) : (
+                sortedAvailable.map((tag) => {
+                  const checked = draftTags.includes(tag.label);
+                  return (
+                    <button
+                      type="button"
+                      key={tag.id}
+                      className={`vd-tag-editor__chip${
+                        checked ? " is-active" : ""
+                      }`}
+                      onClick={() =>
+                        setDraftTags((prev) =>
+                          prev.includes(tag.label)
+                            ? prev.filter((t) => t !== tag.label)
+                            : [...prev, tag.label]
+                        )
+                      }
+                      disabled={tagSaving}
+                      aria-pressed={checked}
+                    >
+                      <span>{tag.label}</span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+
+            {tagError && <div className="vd-tag-editor__error">{tagError}</div>}
+
+            <div className="vd-tag-editor__actions">
+              <button
+                type="button"
+                className="vd-tag-editor__btn"
+                onClick={closeTagEditor}
+                disabled={tagSaving}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="vd-tag-editor__btn is-primary"
+                onClick={saveTags}
+                disabled={tagSaving}
+              >
+                {tagSaving ? "保存中..." : "保存"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )
+    : null;
 
   return (
     <section className="vd-info" aria-label="视频信息">
@@ -127,71 +233,7 @@ export function VideoInfoPanel({
         </div>
       </div>
 
-      {editingTags && (
-        <div className="vd-tag-editor" role="dialog" aria-label="编辑视频标签">
-          <header className="vd-tag-editor__head">
-            <span>选择适用的标签</span>
-            <button
-              type="button"
-              className="vd-tag-editor__close"
-              onClick={closeTagEditor}
-              aria-label="关闭"
-            >
-              <X size={16} />
-            </button>
-          </header>
-
-          <div className="vd-tag-editor__grid">
-            {sortedAvailable.length === 0 ? (
-              <div className="vd-tag-editor__empty">暂无可用标签</div>
-            ) : (
-              sortedAvailable.map((tag) => {
-                const checked = draftTags.includes(tag.label);
-                return (
-                  <button
-                    type="button"
-                    key={tag.id}
-                    className={`vd-tag-editor__chip${
-                      checked ? " is-active" : ""
-                    }`}
-                    onClick={() =>
-                      setDraftTags((prev) =>
-                        prev.includes(tag.label)
-                          ? prev.filter((t) => t !== tag.label)
-                          : [...prev, tag.label]
-                      )
-                    }
-                    aria-pressed={checked}
-                  >
-                    <span>{tag.label}</span>
-                    {typeof tag.count === "number" && <em>{tag.count}</em>}
-                  </button>
-                );
-              })
-            )}
-          </div>
-
-          {tagError && <div className="vd-tag-editor__error">{tagError}</div>}
-
-          <div className="vd-tag-editor__actions">
-            <button
-              type="button"
-              className="vd-tag-editor__btn"
-              onClick={closeTagEditor}
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              className="vd-tag-editor__btn is-primary"
-              onClick={saveTags}
-              disabled={tagSaving}
-            >
-              {tagSaving ? "保存中..." : "保存"}
-            </button>
-          </div>
-        </div>
-      )}
+      {tagEditor}
     </section>
   );
 }

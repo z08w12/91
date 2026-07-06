@@ -17,7 +17,7 @@
  *   .vd-meta         meta 胶囊列表
  *   .vd-actions      操作工具条
  *   .vd-info         简介 + 标签合并卡
- *   .vd-tag-editor   标签编辑器（行内弹层）
+ *   .vd-tag-editor   标签编辑器（页面弹窗）
  *   .vd-rail         推荐栏
  *   .vd-skeleton     loading 占位
  *   .vd-empty        404 占位
@@ -898,10 +898,10 @@
   grid-template-columns: 18px minmax(0, 1fr);
   gap: var(--space-2);
   align-items: start;
-  padding: var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--bg-sunken);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   cursor: pointer;
 }
 
@@ -1159,14 +1159,31 @@
   outline-offset: 2px;
 }
 
-/* ---------- Tag editor (inline popover) ---------- */
+.vd-tag-editor-modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  background: var(--bg-overlay);
+  backdrop-filter: blur(8px);
+  animation: vd-delete-fade var(--duration-fast) var(--ease-out);
+}
+
+/* ---------- Tag editor modal ---------- */
 .vd-tag-editor {
-  margin: 0 var(--space-5) var(--space-5) var(--space-5);
+  width: min(560px, 100%);
+  max-height: min(680px, calc(100vh - var(--space-8)));
+  display: flex;
+  flex-direction: column;
   background: var(--bg-elevated);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-default);
+  box-shadow: var(--shadow-xl);
   overflow: hidden;
+  animation: vd-delete-pop var(--duration-normal) var(--ease-out);
 }
 
 .vd-tag-editor__head {
@@ -1175,11 +1192,11 @@
   justify-content: space-between;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 0;
   font-size: var(--font-sm);
   font-weight: var(--weight-semibold);
   color: var(--text-default);
-  background: rgba(255, 255, 255, 0.02);
+  background: transparent;
 }
 
 .vd-tag-editor__close {
@@ -1195,17 +1212,24 @@
   transition: all var(--transition-fast);
 }
 
-.vd-tag-editor__close:hover {
+.vd-tag-editor__close:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.06);
   color: var(--text-strong);
+}
+
+.vd-tag-editor__close:disabled,
+.vd-tag-editor__chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .vd-tag-editor__grid {
   display: flex;
   flex-wrap: wrap;
+  flex: 1 1 auto;
   gap: var(--space-2);
   padding: var(--space-4);
-  max-height: 240px;
+  max-height: min(52vh, 360px);
   overflow-y: auto;
 }
 
@@ -1220,12 +1244,11 @@
 .vd-tag-editor__chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   height: 30px;
   padding: 0 var(--space-3);
   border-radius: var(--radius-pill);
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
+  background: transparent;
+  border: 0;
   color: var(--text-default);
   font-size: var(--font-sm);
   font-weight: var(--weight-medium);
@@ -1234,27 +1257,14 @@
   user-select: none;
 }
 
-.vd-tag-editor__chip em {
-  color: var(--text-faint);
-  font-style: normal;
-  font-size: var(--font-xs);
-  font-weight: var(--weight-medium);
-}
-
-.vd-tag-editor__chip:hover {
-  border-color: var(--border-strong);
+.vd-tag-editor__chip:hover:not(:disabled) {
+  background: var(--accent-softer);
   color: var(--text-strong);
 }
 
 .vd-tag-editor__chip.is-active {
   background: var(--accent-soft);
-  border-color: var(--border-accent);
   color: var(--accent);
-}
-
-.vd-tag-editor__chip.is-active em {
-  color: var(--accent);
-  opacity: 0.7;
 }
 
 .vd-tag-editor__chip:focus-visible {
@@ -1277,16 +1287,16 @@
   justify-content: flex-end;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
-  border-top: 1px solid var(--border-subtle);
-  background: rgba(255, 255, 255, 0.02);
+  border-top: 0;
+  background: transparent;
 }
 
 .vd-tag-editor__btn {
   height: 34px;
   padding: 0 var(--space-4);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-subtle);
+  background: transparent;
+  border: 0;
   color: var(--text-default);
   font-size: var(--font-sm);
   font-weight: var(--weight-semibold);
@@ -1295,8 +1305,7 @@
 }
 
 .vd-tag-editor__btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: var(--border-strong);
+  background: var(--accent-softer);
   color: var(--text-strong);
 }
 
@@ -1307,7 +1316,6 @@
 
 .vd-tag-editor__btn.is-primary {
   background: var(--accent-gradient);
-  border-color: var(--accent);
   color: var(--text-on-accent);
 }
 
@@ -1870,10 +1878,6 @@
     padding: var(--space-3) var(--space-4);
   }
 
-  .vd-tag-editor {
-    margin: 0 var(--space-4) var(--space-4) var(--space-4);
-  }
-
   .vd-tag-editor__chip {
     height: 34px;
     padding: 0 14px;
@@ -1994,8 +1998,13 @@
     padding: var(--space-3);
   }
 
+  .vd-tag-editor-modal {
+    padding: var(--space-3);
+  }
+
   .vd-tag-editor {
-    margin: 0 var(--space-3) var(--space-3) var(--space-3);
+    width: 100%;
+    max-height: calc(100vh - var(--space-6));
   }
 
   .vd-tag-editor__grid {
