@@ -15,12 +15,14 @@ import * as api from "./api";
 import { useAuth } from "./AuthContext";
 import { useToast } from "./ToastContext";
 import { SpiderIcon } from "./icons/SpiderIcon";
+import { Modal } from "./Modal";
 
 export function AdminLayout() {
   const { logout } = useAuth();
   const navigate = useNavigate();
   const { show } = useToast();
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [availableUpdate, setAvailableUpdate] = useState<api.UpdateCheck | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -40,10 +42,7 @@ export function AdminLayout() {
     try {
       const result = await api.checkUpdate();
       if (result.hasUpdate) {
-        show(
-          `发现新版本 ${result.latestVersion}，当前 ${result.currentVersion}`,
-          "success"
-        );
+        setAvailableUpdate(result);
         return;
       }
       if (result.currentVersion === "unknown") {
@@ -202,6 +201,42 @@ export function AdminLayout() {
       <main className="admin-main">
         <Outlet />
       </main>
+      {availableUpdate && (
+        <Modal
+          open
+          title={`发现新版本 ${availableUpdate.latestVersion}`}
+          className="admin-modal--release-notes"
+          onClose={() => setAvailableUpdate(null)}
+          footer={
+            <>
+              <button type="button" className="admin-btn" onClick={() => setAvailableUpdate(null)}>
+                关闭
+              </button>
+              {availableUpdate.releaseUrl && (
+                <a
+                  className="admin-btn is-primary"
+                  href={availableUpdate.releaseUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  查看发布页
+                </a>
+              )}
+            </>
+          }
+        >
+          <div className="admin-release-notes">
+            <div className="admin-release-notes__versions">
+              <span>当前版本：{availableUpdate.currentVersion}</span>
+              <span>最新版本：{availableUpdate.latestVersion}</span>
+            </div>
+            <section className="admin-release-notes__content" aria-label="Release Note">
+              <h3>Release Note</h3>
+              <div>{availableUpdate.releaseNotes?.trim() || "该版本未提供 Release Note。"}</div>
+            </section>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

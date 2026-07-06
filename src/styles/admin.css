@@ -2098,6 +2098,46 @@
   background: transparent;
 }
 
+.admin-modal--release-notes {
+  width: min(680px, 100%);
+}
+
+.admin-release-notes {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.admin-release-notes__versions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+}
+
+.admin-release-notes__content {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.admin-release-notes__content h3 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--font-md);
+}
+
+.admin-release-notes__content div {
+  max-height: min(52vh, 480px);
+  overflow-y: auto;
+  padding-right: var(--space-2);
+  color: var(--text-default);
+  font-size: var(--font-sm);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .admin-confirm {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);

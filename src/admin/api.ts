@@ -67,6 +67,7 @@ export type UpdateCheck = {
   latestVersion: string;
   hasUpdate: boolean;
   releaseUrl?: string;
+  releaseNotes?: string;
   checkedAt: string;
 };
 

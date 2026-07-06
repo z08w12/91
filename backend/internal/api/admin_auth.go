@@ -19,12 +19,14 @@ type updateCheckDTO struct {
 	LatestVersion  string `json:"latestVersion"`
 	HasUpdate      bool   `json:"hasUpdate"`
 	ReleaseURL     string `json:"releaseUrl,omitempty"`
+	ReleaseNotes   string `json:"releaseNotes,omitempty"`
 	CheckedAt      string `json:"checkedAt"`
 }
 
 type githubReleaseDTO struct {
 	TagName string `json:"tag_name"`
 	HTMLURL string `json:"html_url"`
+	Body    string `json:"body"`
 }
 
 type loginReq struct {
@@ -184,6 +186,7 @@ func (a *AdminServer) checkUpdate(ctx context.Context) (updateCheckDTO, error) {
 		LatestVersion:  latest,
 		HasUpdate:      current != "unknown" && latest != "" && current != latest,
 		ReleaseURL:     release.HTMLURL,
+		ReleaseNotes:   strings.TrimSpace(release.Body),
 		CheckedAt:      time.Now().Format(time.RFC3339),
 	}, nil
 }

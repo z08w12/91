@@ -390,6 +390,7 @@ func TestHandleCheckUpdateReportsNewRelease(t *testing.T) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"tag_name": "v0.2.0",
 			"html_url": "https://github.com/nianzhibai/91/releases/tag/v0.2.0",
+			"body":     "## Changes\n\n- Added update notes dialog",
 		})
 	}))
 	t.Cleanup(releaseServer.Close)
@@ -419,6 +420,9 @@ func TestHandleCheckUpdateReportsNewRelease(t *testing.T) {
 	}
 	if got.ReleaseURL == "" {
 		t.Fatalf("releaseUrl is empty")
+	}
+	if got.ReleaseNotes != "## Changes\n\n- Added update notes dialog" {
+		t.Fatalf("releaseNotes = %q", got.ReleaseNotes)
 	}
 }
 
