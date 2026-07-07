@@ -129,12 +129,11 @@ func (a *AdminServer) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *AdminServer) handleMe(w http.ResponseWriter, r *http.Request) {
-	c, err := r.Cookie("vs_admin")
-	if err != nil {
+	if a.Auth == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
 		return
 	}
-	ok, userID, err := a.Catalog.ValidateSession(r.Context(), c.Value)
+	ok, userID, err := a.Auth.ValidateRequest(w, r)
 	if err != nil || !ok {
 		writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
 		return

@@ -2490,27 +2490,61 @@ func (c *Catalog) SetDriveSkipDirIDs(ctx context.Context, id string, ids []strin
 
 // ---------- Admin session ----------
 
+type SessionInfo struct {
+	ExpiresAt time.Time
+	UserID    int64
+}
+
 func (c *Catalog) CreateSession(ctx context.Context, token string, ttl time.Duration, userID int64) error {
+	now := time.Now()
+	return c.CreateSessionUntil(ctx, token, now.Add(ttl), userID)
+}
+
+func (c *Catalog) CreateSessionUntil(ctx context.Context, token string, expiresAt time.Time, userID int64) error {
 	now := time.Now()
 	_, err := c.db.ExecContext(ctx,
 		`INSERT INTO admin_sessions (token, created_at, expires_at, user_id) VALUES (?, ?, ?, ?)`,
-		token, now.UnixMilli(), now.Add(ttl).UnixMilli(), userID)
+		token, now.UnixMilli(), expiresAt.UnixMilli(), userID)
 	return err
 }
 
-func (c *Catalog) ValidateSession(ctx context.Context, token string) (bool, int64, error) {
+func (c *Catalog) GetSession(ctx context.Context, token string) (SessionInfo, bool, error) {
 	var expires int64
 	var userID int64
 	err := c.db.QueryRowContext(ctx,
 		`SELECT expires_at, COALESCE(user_id, 0) FROM admin_sessions WHERE token = ?`,
 		token).Scan(&expires, &userID)
 	if err == sql.ErrNoRows {
-		return false, 0, nil
+		return SessionInfo{}, false, nil
 	}
 	if err != nil {
+		return SessionInfo{}, false, err
+	}
+	return SessionInfo{
+		ExpiresAt: time.UnixMilli(expires),
+		UserID:    userID,
+	}, true, nil
+}
+
+func (c *Catalog) ValidateSession(ctx context.Context, token string) (bool, int64, error) {
+	session, found, err := c.GetSession(ctx, token)
+	if err != nil || !found {
 		return false, 0, err
 	}
-	return time.Now().UnixMilli() < expires, userID, nil
+	return time.Now().Before(session.ExpiresAt), session.UserID, nil
+}
+
+func (c *Catalog) UpdateSessionExpires(ctx context.Context, token string, expiresAt time.Time) error {
+	res, err := c.db.ExecContext(ctx,
+		`UPDATE admin_sessions SET expires_at = ? WHERE token = ?`,
+		expiresAt.UnixMilli(), token)
+	if err != nil {
+		return err
+	}
+	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (c *Catalog) DeleteSession(ctx context.Context, token string) error {

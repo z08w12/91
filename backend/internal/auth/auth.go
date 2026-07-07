@@ -20,7 +20,8 @@ import (
 
 const (
 	sessionCookie      = "vs_admin"
-	sessionTTL         = 24 * time.Hour
+	sessionTTL         = 7 * 24 * time.Hour
+	sessionRenewBefore = sessionTTL / 2
 	loginFailWindow    = 30 * time.Minute
 	loginFailThreshold = 3
 )
@@ -72,17 +73,11 @@ func (a *Authenticator) Login(w http.ResponseWriter, r *http.Request, user, pass
 	if err != nil {
 		return false, err
 	}
-	if err := a.Catalog.CreateSession(r.Context(), token, sessionTTL, 0); err != nil {
+	expiresAt := a.now().Add(sessionTTL)
+	if err := a.Catalog.CreateSessionUntil(r.Context(), token, expiresAt, 0); err != nil {
 		return false, err
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Now().Add(sessionTTL),
-	})
+	setSessionCookie(w, token, expiresAt)
 	return true, nil
 }
 
@@ -148,14 +143,36 @@ func (a *Authenticator) Logout(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *Authenticator) ValidateRequest(w http.ResponseWriter, r *http.Request) (bool, int64, error) {
+	c, err := r.Cookie(sessionCookie)
+	if err != nil {
+		return false, 0, nil
+	}
+	return a.validateSession(w, r, c.Value)
+}
+
+func (a *Authenticator) validateSession(w http.ResponseWriter, r *http.Request, token string) (bool, int64, error) {
+	session, found, err := a.Catalog.GetSession(r.Context(), token)
+	if err != nil || !found {
+		return false, 0, err
+	}
+	now := a.now()
+	if !now.Before(session.ExpiresAt) {
+		return false, 0, nil
+	}
+	if session.ExpiresAt.Sub(now) < sessionRenewBefore {
+		expiresAt := now.Add(sessionTTL)
+		if err := a.Catalog.UpdateSessionExpires(r.Context(), token, expiresAt); err != nil {
+			return false, 0, err
+		}
+		setSessionCookie(w, token, expiresAt)
+	}
+	return true, session.UserID, nil
+}
+
 func (a *Authenticator) Required(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c, err := r.Cookie(sessionCookie)
-		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		ok, userID, err := a.Catalog.ValidateSession(r.Context(), c.Value)
+		ok, userID, err := a.ValidateRequest(w, r)
 		if err != nil || !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
@@ -291,17 +308,11 @@ func (a *Authenticator) UserLogin(w http.ResponseWriter, r *http.Request, user, 
 			if err != nil {
 				return "", err
 			}
-			if err := a.Catalog.CreateSession(r.Context(), token, sessionTTL, 0); err != nil {
+			expiresAt := a.now().Add(sessionTTL)
+			if err := a.Catalog.CreateSessionUntil(r.Context(), token, expiresAt, 0); err != nil {
 				return "", err
 			}
-			http.SetCookie(w, &http.Cookie{
-				Name:     sessionCookie,
-				Value:    token,
-				Path:     "/",
-				HttpOnly: true,
-				SameSite: http.SameSiteLaxMode,
-				Expires:  time.Now().Add(sessionTTL),
-			})
+			setSessionCookie(w, token, expiresAt)
 			return "admin", nil
 		}
 		if ip != "" {
@@ -333,18 +344,12 @@ func (a *Authenticator) UserLogin(w http.ResponseWriter, r *http.Request, user, 
 	if err != nil {
 		return "", err
 	}
-	if err := a.Catalog.CreateSession(r.Context(), token, sessionTTL, u.ID); err != nil {
+	expiresAt := a.now().Add(sessionTTL)
+	if err := a.Catalog.CreateSessionUntil(r.Context(), token, expiresAt, u.ID); err != nil {
 		return "", err
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Now().Add(sessionTTL),
-	})
+	setSessionCookie(w, token, expiresAt)
 	return u.Role, nil
 }
 
@@ -352,12 +357,7 @@ func (a *Authenticator) UserLogin(w http.ResponseWriter, r *http.Request, user, 
 // belongs to a user with role="admin". Regular users get 403.
 func (a *Authenticator) AdminRequired(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c, err := r.Cookie(sessionCookie)
-		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		ok, userID, err := a.Catalog.ValidateSession(r.Context(), c.Value)
+		ok, userID, err := a.ValidateRequest(w, r)
 		if err != nil || !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
@@ -378,6 +378,17 @@ func (a *Authenticator) AdminRequired(next http.Handler) http.Handler {
 			}
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+func setSessionCookie(w http.ResponseWriter, token string, expiresAt time.Time) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookie,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  expiresAt,
 	})
 }
 

@@ -98,6 +98,142 @@ func TestSuccessfulLoginClearsFailedLoginWindow(t *testing.T) {
 	}
 }
 
+func TestLoginCreatesSevenDaySession(t *testing.T) {
+	ctx := context.Background()
+	cat, err := catalog.Open(t.TempDir() + "/catalog.db")
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := cat.Close(); err != nil {
+			t.Fatalf("close catalog: %v", err)
+		}
+	})
+
+	authr := &Authenticator{
+		Username: "admin",
+		Password: "secret",
+		Catalog:  cat,
+	}
+
+	before := time.Now()
+	rr := httptest.NewRecorder()
+	ok, err := authr.Login(rr, loginRequest("203.0.113.12"), "admin", "secret")
+	after := time.Now()
+	if err != nil || !ok {
+		t.Fatalf("login ok=%v err=%v", ok, err)
+	}
+
+	cookie := responseCookie(t, rr, sessionCookie)
+	minExpires := before.Add(sessionTTL - time.Second)
+	maxExpires := after.Add(sessionTTL + time.Second)
+	if cookie.Expires.Before(minExpires) || cookie.Expires.After(maxExpires) {
+		t.Fatalf("cookie expires at %s, want around %s", cookie.Expires, before.Add(sessionTTL))
+	}
+
+	session, found, err := cat.GetSession(ctx, cookie.Value)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if !found {
+		t.Fatal("session was not persisted")
+	}
+	if session.ExpiresAt.Before(minExpires) || session.ExpiresAt.After(maxExpires) {
+		t.Fatalf("db session expires at %s, want around %s", session.ExpiresAt, before.Add(sessionTTL))
+	}
+}
+
+func TestRequiredRenewsSessionWhenLessThanHalfRemaining(t *testing.T) {
+	ctx := context.Background()
+	cat, err := catalog.Open(t.TempDir() + "/catalog.db")
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := cat.Close(); err != nil {
+			t.Fatalf("close catalog: %v", err)
+		}
+	})
+
+	now := time.Now().Truncate(time.Millisecond)
+	token := "renew-token"
+	if err := cat.CreateSessionUntil(ctx, token, now.Add(sessionRenewBefore-time.Minute), 0); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	authr := &Authenticator{
+		Catalog: cat,
+		Now:     func() time.Time { return now },
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/home", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	res := httptest.NewRecorder()
+	authr.Required(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(res, req)
+
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", res.Code)
+	}
+	expectedExpires := now.Add(sessionTTL)
+	cookie := responseCookie(t, res, sessionCookie)
+	if absDuration(cookie.Expires.Sub(expectedExpires)) > time.Second {
+		t.Fatalf("renewed cookie expires at %s, want %s", cookie.Expires, expectedExpires)
+	}
+	session, found, err := cat.GetSession(ctx, token)
+	if err != nil || !found {
+		t.Fatalf("get renewed session found=%v err=%v", found, err)
+	}
+	if !session.ExpiresAt.Equal(expectedExpires) {
+		t.Fatalf("renewed db session expires at %s, want %s", session.ExpiresAt, expectedExpires)
+	}
+}
+
+func TestRequiredDoesNotRenewSessionWhenMoreThanHalfRemaining(t *testing.T) {
+	ctx := context.Background()
+	cat, err := catalog.Open(t.TempDir() + "/catalog.db")
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := cat.Close(); err != nil {
+			t.Fatalf("close catalog: %v", err)
+		}
+	})
+
+	now := time.Now().Truncate(time.Millisecond)
+	token := "fresh-token"
+	expiresAt := now.Add(sessionRenewBefore + time.Minute)
+	if err := cat.CreateSessionUntil(ctx, token, expiresAt, 0); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	authr := &Authenticator{
+		Catalog: cat,
+		Now:     func() time.Time { return now },
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/home", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	res := httptest.NewRecorder()
+	authr.Required(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(res, req)
+
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", res.Code)
+	}
+	if cookies := res.Result().Cookies(); len(cookies) != 0 {
+		t.Fatalf("unexpected renewal cookies: %#v", cookies)
+	}
+	session, found, err := cat.GetSession(ctx, token)
+	if err != nil || !found {
+		t.Fatalf("get session found=%v err=%v", found, err)
+	}
+	if !session.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("db session expires at %s, want unchanged %s", session.ExpiresAt, expiresAt)
+	}
+}
+
 func TestRequiredRejectsBannedUserSession(t *testing.T) {
 	ctx := context.Background()
 	cat, err := catalog.Open(t.TempDir() + "/catalog.db")
@@ -252,4 +388,22 @@ func loginRequest(ip string) *http.Request {
 	req := httptest.NewRequest(http.MethodPost, "/admin/api/login", strings.NewReader(`{}`))
 	req.RemoteAddr = ip + ":12345"
 	return req
+}
+
+func responseCookie(t *testing.T, rr *httptest.ResponseRecorder, name string) *http.Cookie {
+	t.Helper()
+	for _, cookie := range rr.Result().Cookies() {
+		if cookie.Name == name {
+			return cookie
+		}
+	}
+	t.Fatalf("response cookie %q not found", name)
+	return nil
+}
+
+func absDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
+	}
+	return d
 }
