@@ -339,7 +339,7 @@ test("drive form required fields use save-time prompts instead of label stars", 
 test("crawler management is a separate admin section", () => {
   assert.match(adminLayoutSource, /to="\/admin\/crawlers"/);
   assert.match(adminLayoutSource, /admin-nav__title">爬虫管理/);
-  assert.match(adminLayoutSource, /admin-nav__icon"><SpiderIcon size=\{16\} \/>/);
+  assert.doesNotMatch(adminLayoutSource, /admin-nav__icon|SpiderIcon/);
   assert.match(
     appSource,
     /path="crawlers"[\s\S]*<PageSuspense>[\s\S]*<CrawlersPage \/>[\s\S]*<\/PageSuspense>/
@@ -582,6 +582,18 @@ test("crawler management is a separate admin section", () => {
   assert.match(apiSource, /id\?: string/);
   assert.match(apiSource, /new FormData\(\)/);
   assert.doesNotMatch(driveFormSource, /scriptcrawler/);
+});
+
+test("desktop system group contains update and logout while mobile menu stays unchanged", () => {
+  assert.match(
+    adminLayoutSource,
+    /admin-nav__group-label">系统[\s\S]*?admin-nav__title">主题外观[\s\S]*?className="admin-nav__link admin-nav__action"[\s\S]*?检查更新[\s\S]*?className="admin-nav__link admin-nav__action admin-nav__action--danger"[\s\S]*?退出登录/
+  );
+  assert.doesNotMatch(adminLayoutSource, /admin-sidebar__footer/);
+  assert.match(
+    adminLayoutSource,
+    /admin-sidebar__mobile-panel[\s\S]*?admin-sidebar__home[\s\S]*?admin-sidebar__check-update[\s\S]*?admin-sidebar__logout/
+  );
 });
 
 test("admin shell stays mounted while lazy admin pages load", () => {

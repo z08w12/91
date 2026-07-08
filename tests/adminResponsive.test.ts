@@ -209,9 +209,12 @@ test("admin tag auto-generation setting is removed", () => {
 });
 
 test("admin sidebar active item frame only wraps the centered option", () => {
+  const nav = ruleBody(adminCss, ".admin-nav");
   const navLink = ruleBody(adminCss, ".admin-nav__link");
   const activeMarker = ruleBody(adminCss, ".admin-nav__link.is-active::before");
 
+  assert.match(nav, /justify-content\s*:\s*space-evenly/);
+  assert.match(nav, /gap\s*:\s*var\(--space-4\)/);
   assert.match(navLink, /align-self\s*:\s*center/);
   assert.match(navLink, /width\s*:\s*fit-content/);
   assert.match(navLink, /max-width\s*:\s*100%/);
@@ -219,12 +222,22 @@ test("admin sidebar active item frame only wraps the centered option", () => {
   assert.match(activeMarker, /display\s*:\s*none/);
 });
 
+test("admin sidebar separates adjacent options within the same group", () => {
+  assert.match(
+    adminCss,
+    /\.admin-nav__group > \.admin-nav__link \+ \.admin-nav__link::after\s*\{[^}]*content\s*:\s*"";[^}]*height\s*:\s*1px;[^}]*background\s*:\s*var\(--border-subtle\)/s
+  );
+  const css = mobileCss();
+  const mobileSeparator = ruleBody(css, ".admin-nav__group > .admin-nav__link + .admin-nav__link::after");
+  assert.match(mobileSeparator, /width\s*:\s*1px/);
+  assert.match(mobileSeparator, /height\s*:\s*18px/);
+});
+
 test("current video list does not render the drive summary under filters", () => {
   const shell = ruleBody(adminCss, ".admin-shell");
   const navGroupLabel = ruleBody(adminCss, ".admin-nav__group-label");
   const navLink = ruleBody(adminCss, ".admin-nav__link");
   const navText = ruleBody(adminCss, ".admin-nav__text");
-  const sidebarFooterAction = ruleBodyByContains(adminCss, ".admin-sidebar__footer .admin-sidebar__check-update");
   const pagination = ruleBody(adminCss, ".admin-table-pagination");
   const filter = ruleBody(adminCss, ".admin-videos-filter");
   const toolbar = ruleBody(adminCss, ".admin-videos-list-toolbar");
@@ -249,8 +262,6 @@ test("current video list does not render the drive summary under filters", () =>
   assert.match(navLink, /justify-content\s*:\s*flex-start/);
   assert.match(navLink, /text-align\s*:\s*left/);
   assert.match(navText, /justify-items\s*:\s*start/);
-  assert.match(sidebarFooterAction, /display\s*:\s*flex/);
-  assert.match(sidebarFooterAction, /justify-content\s*:\s*center/);
   assert.match(pagination, /justify-content\s*:\s*center/);
   assert.match(filter, /margin-bottom\s*:\s*var\(--space-4\)/);
   assert.match(toolbar, /margin\s*:\s*var\(--space-2\)\s+0\s+var\(--space-4\)/);
@@ -577,13 +588,12 @@ test("admin video management controls wrap instead of covering text on mobile", 
 
 test("admin loading spinner rotates around icon center", () => {
   const spinner = ruleBody(adminCss, ".admin-spin");
-  const reducedMotion = ruleBodyByContains(adminCss, ".admin-sidebar__check-update:disabled svg");
 
   assert.match(spinner, /animation\s*:\s*admin-update-spin\s+0\.9s\s+linear\s+infinite/);
   assert.match(spinner, /transform-box\s*:\s*fill-box/);
   assert.match(spinner, /transform-origin\s*:\s*center/);
   assert.match(spinner, /will-change\s*:\s*transform/);
-  assert.match(reducedMotion, /animation-duration\s*:\s*0\.9s\s*!important/);
+  assert.match(adminCss, /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.admin-spin\s*\{\s*animation-duration\s*:\s*0\.9s\s*!important/s);
 });
 
 test("mobile video management uses compact theme-aware video cards", () => {
@@ -871,6 +881,7 @@ test("mobile admin top navigation stays compact", () => {
   assert.match(ruleBody(css, ".admin-nav__link"), /height\s*:\s*34px/);
   assert.match(ruleBody(css, ".admin-nav__link"), /line-height\s*:\s*1/);
   assert.match(ruleBody(css, ".admin-nav__link"), /flex\s*:\s*0\s+0\s+auto/);
+  assert.match(ruleBody(css, ".admin-nav__action"), /display\s*:\s*none/);
   assert.match(ruleBody(css, ".admin-main"), /padding\s*:\s*var\(--space-2\)\s+var\(--space-3\)\s+var\(--space-4\)/);
   assert.match(ruleBody(css, ".admin-page__header"), /margin-bottom\s*:\s*var\(--space-3\)/);
 });

@@ -1,20 +1,9 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import {
-  HardDrive,
-  Film,
-  LogOut,
-  Home,
-  Tags,
-  Palette,
-  RefreshCw,
-  MoreVertical,
-  Users,
-} from "lucide-react";
+import { MoreVertical } from "lucide-react";
 import * as api from "./api";
 import { useAuth } from "./AuthContext";
 import { useToast } from "./ToastContext";
-import { SpiderIcon } from "./icons/SpiderIcon";
 import { Modal } from "./Modal";
 
 export function AdminLayout() {
@@ -74,7 +63,6 @@ export function AdminLayout() {
           <div className="admin-nav__group admin-nav__group--home">
             <span className="admin-nav__group-label">主站</span>
             <NavLink to="/" className="admin-nav__link">
-              <span className="admin-nav__icon"><Home size={16} /></span>
               <span className="admin-nav__text">
                 <span className="admin-nav__title">返回主站</span>
               </span>
@@ -88,7 +76,6 @@ export function AdminLayout() {
                 `admin-nav__link ${isActive ? "is-active" : ""}`
               }
             >
-              <span className="admin-nav__icon"><HardDrive size={16} /></span>
               <span className="admin-nav__text">
                 <span className="admin-nav__title">网盘管理</span>
               </span>
@@ -99,7 +86,6 @@ export function AdminLayout() {
                 `admin-nav__link ${isActive ? "is-active" : ""}`
               }
             >
-              <span className="admin-nav__icon"><SpiderIcon size={16} /></span>
               <span className="admin-nav__text">
                 <span className="admin-nav__title">爬虫管理</span>
               </span>
@@ -113,7 +99,6 @@ export function AdminLayout() {
                 `admin-nav__link ${isActive ? "is-active" : ""}`
               }
             >
-              <span className="admin-nav__icon"><Film size={16} /></span>
               <span className="admin-nav__text">
                 <span className="admin-nav__title">视频管理</span>
               </span>
@@ -124,7 +109,6 @@ export function AdminLayout() {
                 `admin-nav__link ${isActive ? "is-active" : ""}`
               }
             >
-              <span className="admin-nav__icon"><Tags size={16} /></span>
               <span className="admin-nav__text">
                 <span className="admin-nav__title">标签管理</span>
               </span>
@@ -135,7 +119,6 @@ export function AdminLayout() {
                 `admin-nav__link ${isActive ? "is-active" : ""}`
               }
             >
-              <span className="admin-nav__icon"><Users size={16} /></span>
               <span className="admin-nav__text">
                 <span className="admin-nav__title">用户管理</span>
               </span>
@@ -149,27 +132,33 @@ export function AdminLayout() {
                 `admin-nav__link ${isActive ? "is-active" : ""}`
               }
             >
-              <span className="admin-nav__icon"><Palette size={16} /></span>
               <span className="admin-nav__text">
                 <span className="admin-nav__title">主题外观</span>
               </span>
             </NavLink>
+            <button
+              type="button"
+              className="admin-nav__link admin-nav__action"
+              onClick={handleCheckUpdate}
+              disabled={checkingUpdate}
+            >
+              <span className="admin-nav__text">
+                <span className="admin-nav__title">
+                  {checkingUpdate ? "检查中" : "检查更新"}
+                </span>
+              </span>
+            </button>
+            <button
+              type="button"
+              className="admin-nav__link admin-nav__action admin-nav__action--danger"
+              onClick={handleLogout}
+            >
+              <span className="admin-nav__text">
+                <span className="admin-nav__title">退出登录</span>
+              </span>
+            </button>
           </div>
         </nav>
-        <div className="admin-sidebar__footer">
-          <button
-            className="admin-sidebar__check-update"
-            onClick={handleCheckUpdate}
-            disabled={checkingUpdate}
-          >
-            <RefreshCw size={14} />
-            {checkingUpdate ? "检查中" : "检查更新"}
-          </button>
-          <button className="admin-sidebar__logout" onClick={handleLogout}>
-            <LogOut size={14} />
-            退出登录
-          </button>
-        </div>
         <button
           className="admin-sidebar__mobile-menu"
           onClick={() => setMobileMenuOpen((v) => !v)}
@@ -183,18 +172,16 @@ export function AdminLayout() {
       )}
       <div className={`admin-sidebar__mobile-panel${mobileMenuOpen ? " is-open" : ""}`}>
         <NavLink to="/" className="admin-sidebar__home" onClick={() => setMobileMenuOpen(false)}>
-          <Home size={14} /> 返回主站
+          返回主站
         </NavLink>
         <button
           className="admin-sidebar__check-update"
           onClick={() => { handleCheckUpdate(); setMobileMenuOpen(false); }}
           disabled={checkingUpdate}
         >
-          <RefreshCw size={14} />
           {checkingUpdate ? "检查中" : "检查更新"}
         </button>
         <button className="admin-sidebar__logout" onClick={() => { handleLogout(); setMobileMenuOpen(false); }}>
-          <LogOut size={14} />
           退出登录
         </button>
       </div>
