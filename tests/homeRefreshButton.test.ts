@@ -89,6 +89,10 @@ test("home page reserves tag cloud space while tags load and uses one empty libr
   assert.match(tagCloudSource, /if \(loaded && visibleTags\.length === 0\) return null/);
   assert.match(tagCloudSource, /const loading = !loaded && visibleTags\.length === 0/);
   assert.match(tagCloudSource, /const TAG_PLACEHOLDER_COUNT = 16;/);
+  assert.match(tagCloudSource, /type TagCloudProps = \{/);
+  assert.match(tagCloudSource, /linkBasePath\?: string;/);
+  assert.match(tagCloudSource, /export function TagCloud\(\{ linkBasePath = "\/list" \}: TagCloudProps\)/);
+  assert.match(tagCloudSource, /to=\{`\$\{linkBasePath\}\?tag=\$\{encodeURIComponent\(tag\.label\)\}`\}/);
   assert.match(tagCloudSource, /className=\{`tag-cloud-container \$\{loading \? "is-loading" : ""\}`\}/);
   assert.match(tagCloudSource, /aria-busy=\{loading \? "true" : undefined\}/);
   assert.match(tagCloudSource, /Array\.from\(\{ length: TAG_PLACEHOLDER_COUNT \}/);
@@ -130,11 +134,21 @@ test("home page reserves tag cloud space while tags load and uses one empty libr
 
   assert.match(homePageSource, /const homeLoading = rankingLoading \|\| latestLoading/);
   assert.match(homePageSource, /import \{ AdminEmptyVisual \} from "@\/admin\/AdminEmptyVisual"/);
-  assert.match(homePageSource, /const \[searchQuery, setSearchQuery\] = useState\(""\)/);
+  assert.doesNotMatch(homePageSource, /const \[searchQuery, setSearchQuery\] = useState\(""\)/);
+  assert.match(homePageSource, /const \[searchParams, setSearchParams\] = useSearchParams\(\)/);
+  assert.match(homePageSource, /const activeSearchQuery = searchParams\.get\("q"\)\?\.trim\(\) \?\? ""/);
+  assert.match(homePageSource, /const activeTag = searchParams\.get\("tag"\)\?\.trim\(\) \?\? ""/);
   assert.match(homePageSource, /const \[searchSort, setSearchSort\] = useState<SortKey>\("latest"\)/);
   assert.match(homePageSource, /const \[searchView, setSearchView\] = useState<ViewMode>\("grid"\)/);
-  assert.match(homePageSource, /<SearchPanel value=\{searchQuery\} onSearch=\{handleSearch\} \/>/);
-  assert.match(homePageSource, /fetchListing\(searchPage,\s*HOME_SEARCH_PAGE_SIZE,\s*\{[\s\S]*?q: activeSearchQuery,[\s\S]*?sort: searchSort/);
+  assert.match(homePageSource, /const handleSearch = useCallback\(\(keyword: string\) => \{[\s\S]*?const q = keyword\.trim\(\);[\s\S]*?setSearchParams\(/);
+  assert.match(homePageSource, /next\.set\("q", q\);[\s\S]*?next\.delete\("tag"\);/);
+  assert.match(homePageSource, /next\.delete\("q"\);/);
+  assert.match(homePageSource, /\{ replace: true \}/);
+  assert.match(homePageSource, /<SearchPanel value=\{activeSearchQuery\} onSearch=\{handleSearch\} \/>/);
+  assert.match(homePageSource, /fetchListing\(searchPage,\s*HOME_SEARCH_PAGE_SIZE,\s*\{[\s\S]*?q: activeSearchQuery,[\s\S]*?tag: activeTag,[\s\S]*?sort: searchSort/);
+  assert.match(homePageSource, /setSearchPage\(1\);\s*\}, \[activeSearchQuery, activeTag\]\)/);
+  assert.match(homePageSource, /const hasActiveTag = activeTag\.length > 0/);
+  assert.match(homePageSource, /const hasActiveFilter = hasActiveSearch \|\| hasActiveTag/);
   assert.doesNotMatch(homePageSource, /搜索结果：/);
   assert.match(homePageSource, /<SortToolbar[\s\S]*?sort=\{searchSort\}[\s\S]*?view=\{searchView\}/);
   assert.match(homePageSource, /setSearchSort\(nextSort\);[\s\S]*?setSearchPage\(1\);/);
@@ -144,7 +158,7 @@ test("home page reserves tag cloud space while tags load and uses one empty libr
   assert.match(homePageSource, /<Pagination[\s\S]*?page=\{searchPage\}[\s\S]*?pageSize=\{HOME_SEARCH_PAGE_SIZE\}/);
   assert.match(homePageSource, /const hasAnyVideos = ranking\.length > 0 \|\| latest\.length > 0/);
   assert.match(homePageSource, /const showEmptyHome = !homeLoading && !hasAnyVideos/);
-  assert.match(homePageSource, /\{!hasActiveSearch && \(\s*hasAnyVideos \? \(\s*<TagCloud \/>\s*\) : \(\s*<div className="tag-cloud-container is-reserved" aria-hidden="true" \/>\s*\)\s*\)\}/);
+  assert.match(homePageSource, /\{!hasActiveSearch && \(\s*hasAnyVideos \|\| hasActiveTag \? \(\s*<TagCloud linkBasePath="\/" \/>\s*\) : \(\s*<div className="tag-cloud-container is-reserved" aria-hidden="true" \/>\s*\)\s*\)\}/);
   assert.match(homePageSource, /<SectionHeader title="随机推荐" \/>/);
   assert.match(homePageSource, /<SectionHeader title="最新视频" \/>/);
   assert.doesNotMatch(homePageSource, /随机展示/);

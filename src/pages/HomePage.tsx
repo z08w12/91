@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { PromoStrip } from "@/components/PromoStrip";
 import { SearchPanel } from "@/components/SearchPanel";
@@ -107,12 +108,14 @@ function cacheNextLatestBatch(items: VideoItem[], count: number): VideoItem[] {
 }
 
 export default function HomePage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeSearchQuery = searchParams.get("q")?.trim() ?? "";
+  const activeTag = searchParams.get("tag")?.trim() ?? "";
   const [rankingVideos, setRankingVideos] = useState<VideoItem[]>(cachedRanking ?? []);
   const [latestVideos, setLatestVideos] = useState<VideoItem[]>(cachedLatestBatch ?? []);
   const [rankingLoading, setRankingLoading] = useState(cachedRanking === null);
   const [latestLoading, setLatestLoading] = useState(cachedLatestBatch === null);
   const [refreshing, setRefreshing] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
   const [searchPage, setSearchPage] = useState(1);
   const [searchItems, setSearchItems] = useState<VideoItem[]>([]);
   const [searchTotal, setSearchTotal] = useState(0);
@@ -120,7 +123,6 @@ export default function HomePage() {
   const [searchSort, setSearchSort] = useState<SortKey>("latest");
   const [searchView, setSearchView] = useState<ViewMode>("grid");
   const isMobile = useIsMobile();
-  const activeSearchQuery = searchQuery.trim();
 
   const refreshHome = useCallback(async () => {
     setRefreshing(true);
@@ -145,13 +147,30 @@ export default function HomePage() {
   }, []);
 
   const handleSearch = useCallback((keyword: string) => {
-    setSearchQuery(keyword);
+    const q = keyword.trim();
     setSearchPage(1);
-  }, []);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (q) {
+          next.set("q", q);
+          next.delete("tag");
+        } else {
+          next.delete("q");
+        }
+        return next;
+      },
+      { replace: true }
+    );
+  }, [setSearchParams]);
 
   useEffect(() => {
-    document.title = activeSearchQuery ? `搜索 "${activeSearchQuery}"` : "首页";
-  }, [activeSearchQuery]);
+    document.title = activeSearchQuery
+      ? `搜索 "${activeSearchQuery}"`
+      : activeTag
+      ? `标签 ${activeTag}`
+      : "首页";
+  }, [activeSearchQuery, activeTag]);
 
   useEffect(() => {
     let active = true;
@@ -191,7 +210,7 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    if (!activeSearchQuery) {
+    if (!activeSearchQuery && !activeTag) {
       setSearchItems([]);
       setSearchTotal(0);
       setSearchLoading(false);
@@ -202,6 +221,7 @@ export default function HomePage() {
     setSearchLoading(true);
     fetchListing(searchPage, HOME_SEARCH_PAGE_SIZE, {
       q: activeSearchQuery,
+      tag: activeTag,
       sort: searchSort,
     })
       .then((result) => {
@@ -215,13 +235,19 @@ export default function HomePage() {
     return () => {
       active = false;
     };
-  }, [activeSearchQuery, searchPage, searchSort]);
+  }, [activeSearchQuery, activeTag, searchPage, searchSort]);
+
+  useEffect(() => {
+    setSearchPage(1);
+  }, [activeSearchQuery, activeTag]);
 
   const displayCount = isMobile ? MOBILE_COUNT : DESKTOP_COUNT;
   const ranking = rankingVideos.slice(0, displayCount);
   const latest = latestVideos.slice(0, displayCount);
   const homeLoading = rankingLoading || latestLoading;
   const hasActiveSearch = activeSearchQuery.length > 0;
+  const hasActiveTag = activeTag.length > 0;
+  const hasActiveFilter = hasActiveSearch || hasActiveTag;
   const searchTotalPages = Math.max(1, Math.ceil(searchTotal / HOME_SEARCH_PAGE_SIZE));
   const hasAnyVideos = ranking.length > 0 || latest.length > 0;
   const showEmptyHome = !homeLoading && !hasAnyVideos;
@@ -230,17 +256,17 @@ export default function HomePage() {
     <AppShell mobileAutoHideNav>
       <div className="container page-section home-discovery-section">
         <PromoStrip />
-        <SearchPanel value={searchQuery} onSearch={handleSearch} />
+        <SearchPanel value={activeSearchQuery} onSearch={handleSearch} />
         {!hasActiveSearch && (
-          hasAnyVideos ? (
-            <TagCloud />
+          hasAnyVideos || hasActiveTag ? (
+            <TagCloud linkBasePath="/" />
           ) : (
             <div className="tag-cloud-container is-reserved" aria-hidden="true" />
           )
         )}
       </div>
 
-      {hasActiveSearch ? (
+      {hasActiveFilter ? (
         <div className="container page-section home-primary-section">
           <SortToolbar
             sort={searchSort}
@@ -302,7 +328,7 @@ export default function HomePage() {
         </>
       )}
 
-      {!hasActiveSearch && (
+      {!hasActiveFilter && (
         <button
           type="button"
           className={`home-refresh ${refreshing ? "is-refreshing" : ""}`}

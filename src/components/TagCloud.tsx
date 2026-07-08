@@ -4,7 +4,11 @@ import { fetchTags, type TagItem } from "@/data/videos";
 
 const TAG_PLACEHOLDER_COUNT = 16;
 
-export function TagCloud() {
+type TagCloudProps = {
+  linkBasePath?: string;
+};
+
+export function TagCloud({ linkBasePath = "/list" }: TagCloudProps) {
   const [params] = useSearchParams();
   const activeTag = params.get("tag");
   const [tags, setTags] = useState<TagItem[]>([]);
@@ -106,7 +110,7 @@ export function TagCloud() {
   const renderTag = (tag: TagItem) => (
     <Link
       key={tag.id}
-      to={`/list?tag=${encodeURIComponent(tag.label)}`}
+      to={`${linkBasePath}?tag=${encodeURIComponent(tag.label)}`}
       className={`tag-chip ${activeTag === tag.label ? "is-active" : ""}`}
     >
       {tag.label}
