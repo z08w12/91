@@ -134,7 +134,7 @@ test("home page reserves tag cloud space while tags load and uses one empty libr
   assert.match(homePageSource, /className="container page-section home-discovery-section"/);
   assert.match(homePageSource, /className="container page-section home-primary-section"/);
   assert.match(homePageSource, /className="home-empty"/);
-  assert.match(homePageSource, /当前还没有可播放的视频/);
+  assert.match(homePageSource, /当前没有可播放视频/);
 
   const discoverySection = ruleBody(layoutCss, ".home-discovery-section");
   const primaryHeader = ruleBody(layoutCss, ".home-primary-section .section-header");

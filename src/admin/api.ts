@@ -207,6 +207,7 @@ export type AdminCrawler = {
   proxy?: string;
   targetNew?: string;
   uploadDriveId?: string;
+  paused: boolean;
   teaserEnabled: boolean;
   lastCrawlAt?: number;
   scanGenerationStatus?: DriveGenerationStatus;
@@ -321,6 +322,16 @@ export function stopCrawlerTasks(id: string) {
   return request<{ ok: boolean; stopped: boolean }>(
     `/crawlers/${encodeURIComponent(id)}/tasks/stop`,
     { method: "POST" }
+  );
+}
+
+export function setCrawlerPaused(id: string, paused: boolean) {
+  return request<{ ok: boolean; paused: boolean }>(
+    `/crawlers/${encodeURIComponent(id)}/paused`,
+    {
+      method: "POST",
+      body: JSON.stringify({ paused }),
+    }
   );
 }
 

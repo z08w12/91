@@ -33,6 +33,7 @@ type crawlerDTO struct {
 	Proxy                       string           `json:"proxy,omitempty"`
 	TargetNew                   string           `json:"targetNew,omitempty"`
 	UploadDriveID               string           `json:"uploadDriveId,omitempty"`
+	Paused                      bool             `json:"paused"`
 	TeaserEnabled               bool             `json:"teaserEnabled"`
 	LastCrawlAt                 int64            `json:"lastCrawlAt,omitempty"`
 	ScanGenerationStatus        GenerationStatus `json:"scanGenerationStatus"`
@@ -62,6 +63,10 @@ type upsertCrawlerReq struct {
 	TargetNew       string `json:"targetNew"`
 	UploadDriveID   string `json:"uploadDriveId"`
 	TeaserEnabled   *bool  `json:"teaserEnabled,omitempty"`
+}
+
+type crawlerPausedReq struct {
+	Paused bool `json:"paused"`
 }
 
 func (a *AdminServer) handleListCrawlers(w http.ResponseWriter, r *http.Request) {
@@ -123,6 +128,7 @@ func (a *AdminServer) crawlerDTOForDrive(d *catalog.Drive, assets catalog.Crawle
 		Proxy:                       strings.TrimSpace(d.Credentials["proxy"]),
 		TargetNew:                   strings.TrimSpace(d.Credentials["target_new"]),
 		UploadDriveID:               strings.TrimSpace(d.Credentials["upload_drive_id"]),
+		Paused:                      crawlerPaused(d),
 		TeaserEnabled:               d.TeaserEnabled,
 		LastCrawlAt:                 lastCrawlAt,
 		ScanGenerationStatus:        generation.Scan,
@@ -143,6 +149,18 @@ func (a *AdminServer) crawlerDTOForDrive(d *catalog.Drive, assets catalog.Crawle
 		LocalVideoCount:             assets.Local,
 		MigratedVideoCount:          assets.Migrated,
 	}
+}
+
+func crawlerPaused(d *catalog.Drive) bool {
+	if d == nil || d.Credentials == nil {
+		return false
+	}
+	raw := strings.TrimSpace(d.Credentials["paused"])
+	if raw == "" {
+		return false
+	}
+	v, err := strconv.ParseBool(raw)
+	return err == nil && v
 }
 
 func crawlerVideoIDPrefixes(d *catalog.Drive) []string {
@@ -625,6 +643,29 @@ func (a *AdminServer) handleRunCrawler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, resp)
 }
 
+func (a *AdminServer) handleSetCrawlerPaused(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	d, err := a.Catalog.GetDrive(r.Context(), id)
+	if err != nil || d == nil || !isConfiguredCrawlerDrive(d) {
+		http.Error(w, "crawler not found", http.StatusNotFound)
+		return
+	}
+	var body crawlerPausedReq
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if d.Credentials == nil {
+		d.Credentials = map[string]string{}
+	}
+	d.Credentials["paused"] = strconv.FormatBool(body.Paused)
+	if err := a.Catalog.UpsertDrive(r.Context(), d); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "paused": body.Paused})
+}
+
 func (a *AdminServer) handleUploadCrawlerVideos(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	d, err := a.Catalog.GetDrive(r.Context(), id)
@@ -749,6 +790,7 @@ func (a *AdminServer) handleDeleteCrawler(w http.ResponseWriter, r *http.Request
 	delete(d.Credentials, "script_path")
 	delete(d.Credentials, "proxy")
 	delete(d.Credentials, "target_new")
+	delete(d.Credentials, "paused")
 	delete(d.Credentials, "builtin")
 	delete(d.Credentials, "python_path")
 	delete(d.Credentials, "config_json")

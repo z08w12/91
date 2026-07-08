@@ -784,11 +784,7 @@ export function DrivesPage() {
             <RefreshCw size={13} /> 重试
           </button>
         </div>
-      ) : list.length === 0 ? (
-        <div className="admin-card admin-empty">
-          当前还没有配置任何网盘
-        </div>
-      ) : (
+      ) : list.length > 0 ? (
         <div className="admin-drives-grid">
           {list.map((d) => {
             const iconSrc = driveKindIconPath(d.kind);
@@ -834,7 +830,7 @@ export function DrivesPage() {
             );
           })}
         </div>
-      )}
+      ) : null}
 
       <Modal
         open={modalOpen}

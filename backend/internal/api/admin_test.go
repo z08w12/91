@@ -1126,6 +1126,7 @@ func TestHandleListCrawlersOnlyIncludesCrawlerPageScripts(t *testing.T) {
 				"proxy":           " http://127.0.0.1:7890 ",
 				"script_path":     scriptPath,
 				"upload_drive_id": "p115-target",
+				"paused":          "true",
 			},
 			Status:        "ok",
 			TeaserEnabled: false,
@@ -1211,6 +1212,7 @@ func TestHandleListCrawlersOnlyIncludesCrawlerPageScripts(t *testing.T) {
 		Kind             string `json:"kind"`
 		Proxy            string `json:"proxy"`
 		UploadDriveID    string `json:"uploadDriveId"`
+		Paused           bool   `json:"paused"`
 		TeaserEnabled    bool   `json:"teaserEnabled"`
 		LastCrawlAt      int64  `json:"lastCrawlAt"`
 		TotalCrawled     int    `json:"totalCrawledCount"`
@@ -1228,6 +1230,7 @@ func TestHandleListCrawlersOnlyIncludesCrawlerPageScripts(t *testing.T) {
 		Kind             string
 		Proxy            string
 		UploadDriveID    string
+		Paused           bool
 		TeaserEnabled    bool
 		LastCrawlAt      int64
 		TotalCrawled     int
@@ -1244,6 +1247,7 @@ func TestHandleListCrawlersOnlyIncludesCrawlerPageScripts(t *testing.T) {
 			Kind:             d.Kind,
 			Proxy:            d.Proxy,
 			UploadDriveID:    d.UploadDriveID,
+			Paused:           d.Paused,
 			TeaserEnabled:    d.TeaserEnabled,
 			LastCrawlAt:      d.LastCrawlAt,
 			TotalCrawled:     d.TotalCrawled,
@@ -1268,6 +1272,9 @@ func TestHandleListCrawlersOnlyIncludesCrawlerPageScripts(t *testing.T) {
 	}
 	if byID["crawler-main"].UploadDriveID != "p115-target" {
 		t.Fatalf("uploadDriveId = %q, want p115-target", byID["crawler-main"].UploadDriveID)
+	}
+	if !byID["crawler-main"].Paused {
+		t.Fatal("paused = false, want true from crawler drive")
 	}
 	if byID["crawler-main"].TeaserEnabled {
 		t.Fatal("teaserEnabled = true, want false from crawler drive")
@@ -1826,6 +1833,7 @@ func TestHandleDeleteCrawlerRemovesImportedScript(t *testing.T) {
 			"script_path": scriptPath,
 			"proxy":       "http://127.0.0.1:7890",
 			"target_new":  "10",
+			"paused":      "true",
 		},
 	}); err != nil {
 		t.Fatalf("seed crawler: %v", err)
@@ -1876,7 +1884,7 @@ func TestHandleDeleteCrawlerRemovesImportedScript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("crawler drive should remain for existing videos: %v", err)
 	}
-	if drive.Credentials["script_path"] != "" || drive.Credentials["proxy"] != "" || drive.Credentials["target_new"] != "" {
+	if drive.Credentials["script_path"] != "" || drive.Credentials["proxy"] != "" || drive.Credentials["target_new"] != "" || drive.Credentials["paused"] != "" {
 		t.Fatalf("crawler credentials were not cleared: %+v", drive.Credentials)
 	}
 	if _, err := cat.GetVideo(ctx, "video-from-crawler"); err != nil {
@@ -1892,6 +1900,56 @@ func TestHandleDeleteCrawlerRemovesImportedScript(t *testing.T) {
 	}
 	if !got.OK || got.DeletedVideos != 0 || !got.DeletedScript {
 		t.Fatalf("response = %#v", got)
+	}
+}
+
+func TestHandleSetCrawlerPausedPersistsCredential(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	cat, err := catalog.Open(filepath.Join(tmp, "catalog.db"))
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := cat.Close(); err != nil {
+			t.Fatalf("close catalog: %v", err)
+		}
+	})
+	if err := cat.UpsertDrive(ctx, &catalog.Drive{
+		ID:          "crawler-main",
+		Kind:        scriptcrawler.Kind,
+		Name:        "Crawler",
+		RootID:      "/",
+		Credentials: map[string]string{"script_path": "/tmp/crawler.py"},
+	}); err != nil {
+		t.Fatalf("seed crawler: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/crawlers/crawler-main/paused", strings.NewReader(`{"paused":true}`))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "crawler-main")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	rr := httptest.NewRecorder()
+	(&AdminServer{Catalog: cat}).handleSetCrawlerPaused(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		OK     bool `json:"ok"`
+		Paused bool `json:"paused"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.OK || !resp.Paused {
+		t.Fatalf("response = %#v, want paused true", resp)
+	}
+	drive, err := cat.GetDrive(ctx, "crawler-main")
+	if err != nil {
+		t.Fatalf("get crawler: %v", err)
+	}
+	if drive.Credentials["paused"] != "true" {
+		t.Fatalf("paused credential = %q, want true", drive.Credentials["paused"])
 	}
 }
 

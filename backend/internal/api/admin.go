@@ -209,6 +209,7 @@ func (a *AdminServer) Register(r chi.Router) {
 			r.Delete("/crawlers/{id}", a.handleDeleteCrawler)
 			r.Post("/crawlers/{id}/run", a.handleRunCrawler)
 			r.Post("/crawlers/{id}/upload", a.handleUploadCrawlerVideos)
+			r.Post("/crawlers/{id}/paused", a.handleSetCrawlerPaused)
 			r.Post("/crawlers/{id}/tasks/stop", a.handleStopCrawlerTasks)
 
 			// 视频

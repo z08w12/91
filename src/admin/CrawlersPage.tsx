@@ -8,21 +8,12 @@ import {
   type ReactNode,
 } from "react";
 import {
-  Activity,
   AlertTriangle,
   Check,
-  ChevronDown,
-  CircleStop,
   Download,
   FileCode2,
-  Link as LinkIcon,
-  Pencil,
-  Plus,
-  Power,
-  PowerOff,
   RefreshCw,
   TestTube,
-  Trash2,
   Upload,
 } from "lucide-react";
 import * as api from "./api";
@@ -55,11 +46,12 @@ export function CrawlersPage() {
   const [list, setList] = useState<api.AdminCrawler[]>([]);
   const [uploadTargets, setUploadTargets] = useState<api.AdminDrive[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expandedId, setExpandedId] = useState("");
+  const [detailTargetId, setDetailTargetId] = useState("");
   const [runningId, setRunningId] = useState("");
   const [uploadingId, setUploadingId] = useState("");
   const [stoppingId, setStoppingId] = useState("");
-  const [togglingTeaserId, setTogglingTeaserId] = useState("");
+  const [togglingPausedId, setTogglingPausedId] = useState("");
+  const [togglingTeasers, setTogglingTeasers] = useState(false);
   // undefined = 编辑器关闭；null = 新建；其余 = 编辑已有爬虫
   const [editorTarget, setEditorTarget] = useState<api.AdminCrawler | null | undefined>(undefined);
   const [deleteTarget, setDeleteTarget] = useState<api.AdminCrawler | null>(null);
@@ -99,16 +91,6 @@ export function CrawlersPage() {
     }, POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [anyBusy, refresh]);
-
-  const stats = useMemo(
-    () => ({
-      total: list.length,
-      ready: list.filter((item) => item.status === "ok").length,
-      busy: list.filter(crawlerBusy).length,
-      error: list.filter((item) => item.status === "error").length,
-    }),
-    [list]
-  );
 
   async function run(crawler: api.AdminCrawler) {
     setRunningId(crawler.id);
@@ -157,20 +139,42 @@ export function CrawlersPage() {
     }
   }
 
-  async function toggleTeaser(crawler: api.AdminCrawler) {
-    const next = !crawler.teaserEnabled;
-    setTogglingTeaserId(crawler.id);
-    setList((prev) => prev.map((item) => (item.id === crawler.id ? { ...item, teaserEnabled: next } : item)));
+  async function togglePaused(crawler: api.AdminCrawler) {
+    const next = !crawler.paused;
+    const previous = list;
+    setTogglingPausedId(crawler.id);
+    setList((prev) => prev.map((item) => (item.id === crawler.id ? { ...item, paused: next } : item)));
     try {
-      const resp = await api.setDriveTeaserEnabled(crawler.id, next);
-      setList((prev) => prev.map((item) => (item.id === crawler.id ? { ...item, teaserEnabled: resp.teaserEnabled } : item)));
-      show(resp.teaserEnabled ? `已开启「${crawler.name}」预览视频生成` : `已关闭「${crawler.name}」预览视频生成`, "success");
+      await api.setCrawlerPaused(crawler.id, next);
+      show(next ? "已暂停该爬虫的凌晨抓取" : "已恢复该爬虫的凌晨抓取", "success");
       await refresh(true);
     } catch (e) {
-      setList((prev) => prev.map((item) => (item.id === crawler.id ? { ...item, teaserEnabled: crawler.teaserEnabled } : item)));
-      show(e instanceof Error ? e.message : "切换预览视频失败", "error");
+      setList(previous);
+      show(e instanceof Error ? e.message : "切换暂停状态失败", "error");
     } finally {
-      setTogglingTeaserId("");
+      setTogglingPausedId("");
+    }
+  }
+
+  async function toggleCrawlerTeasers() {
+    if (list.length === 0 || togglingTeasers) return;
+    const next = !list.every((item) => item.teaserEnabled);
+    const previous = list;
+    setTogglingTeasers(true);
+    setList((prev) => prev.map((item) => ({ ...item, teaserEnabled: next })));
+    try {
+      for (const crawler of previous) {
+        if (crawler.teaserEnabled !== next) {
+          await api.setDriveTeaserEnabled(crawler.id, next);
+        }
+      }
+      show(next ? "已开启所有爬虫预览视频生成" : "已关闭所有爬虫预览视频生成", "success");
+      await refresh(true);
+    } catch (e) {
+      setList(previous);
+      show(e instanceof Error ? e.message : "批量切换预览视频失败", "error");
+    } finally {
+      setTogglingTeasers(false);
     }
   }
 
@@ -185,7 +189,7 @@ export function CrawlersPage() {
         show("已删除爬虫，已爬取的视频保留", "success");
       }
       setDeleteTarget(null);
-      if (expandedId === deleteTarget.id) setExpandedId("");
+      if (detailTargetId === deleteTarget.id) setDetailTargetId("");
       await refresh(true);
     } catch (e) {
       show(e instanceof Error ? e.message : "删除失败", "error");
@@ -194,41 +198,45 @@ export function CrawlersPage() {
     }
   }
 
+  const hasCrawlers = list.length > 0;
+  const allCrawlerTeasersEnabled = hasCrawlers && list.every((item) => item.teaserEnabled);
+  const partialCrawlerTeasersEnabled = !allCrawlerTeasersEnabled && list.some((item) => item.teaserEnabled);
+
   return (
     <section className="admin-page">
       <header className="admin-page__header">
-        <div>
-          <h1 className="admin-page__title">爬虫管理</h1>
-        </div>
-        <div className="admin-detail-actions-inline">
-          <button className="admin-btn" onClick={() => refresh()} disabled={loading}>
-            <RefreshCw size={14} className={loading ? "admin-spin" : undefined} /> 刷新
+        <div className="admin-crawler-global-teaser">
+          <span>预览视频</span>
+          <button
+            type="button"
+            className={`toggle-switch ${allCrawlerTeasersEnabled ? "is-on" : ""} ${
+              togglingTeasers ? "is-saving" : ""
+            }`}
+            role="switch"
+            aria-checked={allCrawlerTeasersEnabled}
+            aria-label="切换全部爬虫预览视频生成"
+            disabled={!hasCrawlers || togglingTeasers}
+            onClick={toggleCrawlerTeasers}
+            title={
+              partialCrawlerTeasersEnabled
+                ? "部分爬虫已开启，点击开启全部"
+                : allCrawlerTeasersEnabled
+                  ? "关闭所有爬虫预览视频生成"
+                  : "开启所有爬虫预览视频生成"
+            }
+          >
+            <span className="toggle-switch__dot" />
           </button>
-          <button className="admin-btn is-primary" onClick={() => setEditorTarget(null)}>
-            <Plus size={14} /> 添加爬虫
+        </div>
+        <div className="admin-detail-actions-inline admin-crawler-page-actions">
+          <button className="admin-btn" onClick={() => setEditorTarget(null)}>
+            添加爬虫
           </button>
         </div>
       </header>
 
       <div className="admin-crawler-console">
-        <div className="admin-crawler-overview">
-          <CrawlerMetric label="已配置" value={stats.total} icon={<SpiderIcon size={16} />} />
-          <CrawlerMetric label="已就绪" value={stats.ready} icon={<Activity size={16} />} tone="ok" />
-          <CrawlerMetric label="任务进行中" value={stats.busy} icon={<RefreshCw size={16} />} tone="info" />
-          <CrawlerMetric label="异常" value={stats.error} icon={<AlertTriangle size={16} />} tone="error" />
-        </div>
-
         <div className="admin-card admin-crawler-list">
-          <div className="admin-crawler-list__head">
-            <header className="admin-card__title">
-              <SpiderIcon size={16} /> 已配置爬虫
-            </header>
-            {anyBusy && (
-              <span className="admin-crawler-list__live">
-                <RefreshCw size={12} className="admin-spin" /> 任务进行中，自动刷新
-              </span>
-            )}
-          </div>
           {loading ? (
             <div className="admin-loading-state">
               <RefreshCw size={18} className="admin-spin" />
@@ -238,10 +246,6 @@ export function CrawlersPage() {
             <div className="admin-crawler-empty">
               <SpiderIcon size={28} />
               <strong>暂无爬虫</strong>
-              <p>导入脚本 → 测试运行 → 保存启用，三步接入一个新片源</p>
-              <button className="admin-btn is-primary" type="button" onClick={() => setEditorTarget(null)}>
-                <Plus size={13} /> 添加爬虫
-              </button>
             </div>
           ) : (
             <div className="admin-crawler-table">
@@ -249,18 +253,24 @@ export function CrawlersPage() {
                 <CrawlerRow
                   key={crawler.id}
                   crawler={crawler}
-                  expanded={expandedId === crawler.id}
+                  expanded={detailTargetId === crawler.id}
                   running={runningId === crawler.id}
                   uploading={uploadingId === crawler.id}
                   stopping={stoppingId === crawler.id}
-                  togglingTeaser={togglingTeaserId === crawler.id}
-                  onToggle={() => setExpandedId(expandedId === crawler.id ? "" : crawler.id)}
+                  togglingPaused={togglingPausedId === crawler.id}
+                  onToggleOpen={() => setDetailTargetId((current) => (current === crawler.id ? "" : crawler.id))}
                   onRun={() => run(crawler)}
                   onUpload={() => uploadVideos(crawler)}
                   onStop={() => stop(crawler)}
-                  onToggleTeaser={() => toggleTeaser(crawler)}
-                  onEdit={() => setEditorTarget(crawler)}
-                  onDelete={() => setDeleteTarget(crawler)}
+                  onEdit={() => {
+                    setDetailTargetId("");
+                    setEditorTarget(crawler);
+                  }}
+                  onDelete={() => {
+                    setDetailTargetId("");
+                    setDeleteTarget(crawler);
+                  }}
+                  onTogglePaused={() => togglePaused(crawler)}
                 />
               ))}
             </div>
@@ -268,39 +278,31 @@ export function CrawlersPage() {
         </div>
       </div>
 
-      <CrawlerEditorModal
-        open={editorTarget !== undefined}
-        crawler={editorTarget ?? null}
-        uploadTargets={uploadTargets}
-        onClose={() => setEditorTarget(undefined)}
-        onSaved={() => {
-          setEditorTarget(undefined);
-          refresh(true);
-        }}
-      />
+      {editorTarget !== undefined && (
+        <CrawlerEditorModal
+          key={editorTarget?.id ?? "new"}
+          open
+          crawler={editorTarget}
+          uploadTargets={uploadTargets}
+          onClose={() => setEditorTarget(undefined)}
+          onSaved={() => {
+            setEditorTarget(undefined);
+            refresh(true);
+          }}
+        />
+      )}
 
       <ConfirmModal
         open={deleteTarget !== null}
         title="删除爬虫"
         message={`确定删除爬虫「${deleteTarget?.name ?? ""}」？`}
-        details={["爬虫配置和脚本文件会被删除", "已爬取的视频、封面和预览会保留"]}
-        confirmText="删除"
-        danger
+        plainConfirm
+        hideIcon
         loading={deleting}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={confirmDelete}
       />
     </section>
-  );
-}
-
-function CrawlerMetric({ label, value, icon, tone }: { label: string; value: number; icon: ReactNode; tone?: "ok" | "info" | "error" }) {
-  return (
-    <div className={`admin-crawler-metric ${tone ? `is-${tone}` : ""}`}>
-      <span className="admin-crawler-metric__icon">{icon}</span>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
   );
 }
 
@@ -310,93 +312,101 @@ function CrawlerRow({
   running,
   uploading,
   stopping,
-  togglingTeaser,
-  onToggle,
+  togglingPaused,
+  onToggleOpen,
   onRun,
   onUpload,
   onStop,
-  onToggleTeaser,
   onEdit,
   onDelete,
+  onTogglePaused,
 }: {
   crawler: api.AdminCrawler;
   expanded: boolean;
   running: boolean;
   uploading: boolean;
   stopping: boolean;
-  togglingTeaser: boolean;
-  onToggle: () => void;
+  togglingPaused: boolean;
+  onToggleOpen: () => void;
   onRun: () => void;
   onUpload: () => void;
   onStop: () => void;
-  onToggleTeaser: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onTogglePaused: () => void;
 }) {
-  const busy = crawlerBusy(crawler);
-  const uploadButtonTitle = uploading ? "上传请求处理中" : "上传本地爬虫视频到已配置的上传网盘";
+  const crawling = running || crawler.scanGenerationStatus?.state === "scanning";
   return (
     <div className={`admin-crawler-row ${expanded ? "is-expanded" : ""}`}>
       <div className="admin-crawler-row__line">
-        <button type="button" className="admin-crawler-row__main" onClick={onToggle} aria-expanded={expanded}>
+        <button type="button" className="admin-crawler-row__main" onClick={onToggleOpen} aria-expanded={expanded}>
           <span className="admin-crawler-row__brand">
             <SpiderIcon size={16} />
           </span>
           <span className="admin-crawler-row__title-wrap">
-            <strong>{crawler.name}</strong>
-            <span>
+            <span className="admin-crawler-row__title-line">
+              <strong>{crawler.name}</strong>
+              {crawling && (
+                <span className="admin-status admin-generation-state is-generating">
+                  正在抓取
+                </span>
+              )}
+            </span>
+            <span className="admin-crawler-row__meta">
               上次抓取 {formatLastCrawl(crawler.lastCrawlAt)} · 每次新增 {crawler.targetNew || "10"} 条 · 累计爬取 {crawler.totalCrawledCount ?? 0} 条
             </span>
           </span>
-          <ChevronDown size={16} className="admin-crawler-row__chevron" />
         </button>
         <div className="admin-crawler-row__actions">
-          <button
-            className="admin-btn admin-crawler-preview-card-toggle"
-            type="button"
-            onClick={onToggleTeaser}
-            disabled={togglingTeaser}
-            aria-pressed={crawler.teaserEnabled}
-            title={crawler.teaserEnabled ? "关闭后，该爬虫新爬取的视频不再生成预览视频" : "开启后，该爬虫新爬取的视频会生成预览视频"}
-          >
-            {crawler.teaserEnabled ? <Power size={13} /> : <PowerOff size={13} />}
-            <span>{crawler.teaserEnabled ? "预览：开" : "预览：关"}</span>
+          <button className="admin-btn" type="button" onClick={onTogglePaused} disabled={togglingPaused}>
+            {togglingPaused ? "处理中..." : crawler.paused ? "恢复使用" : "暂停使用"}
           </button>
-          {busy ? (
-            <button className="admin-btn is-stop" type="button" onClick={onStop} disabled={stopping}>
-              <CircleStop size={13} /> {stopping ? "停止中..." : "停止"}
-            </button>
-          ) : (
-            <button className="admin-btn" type="button" onClick={onRun} disabled={running}>
-              <Download size={13} /> {running ? "触发中..." : "立即抓取"}
-            </button>
-          )}
-          <button
-            className="admin-btn"
-            type="button"
-            onClick={onUpload}
-            title={uploadButtonTitle}
-          >
-            <Upload size={13} /> {uploading ? "上传中..." : "上传视频"}
+          <button className="admin-btn" type="button" onClick={onRun} disabled={running}>
+            {running ? "触发中..." : "立即抓取"}
+          </button>
+          <button className="admin-btn" type="button" onClick={onUpload}>
+            {uploading ? "上传中..." : "触发上传"}
           </button>
           <button className="admin-btn" type="button" onClick={onEdit}>
-            <Pencil size={13} /> 编辑
+            编辑
           </button>
-          <button className="admin-btn is-danger admin-crawler-row__delete" type="button" onClick={onDelete} aria-label="删除爬虫" title="删除爬虫">
-            <Trash2 size={13} />
+          <button className="admin-btn is-danger" type="button" onClick={onDelete}>
+            删除
           </button>
         </div>
       </div>
-      {expanded && <CrawlerDetail crawler={crawler} />}
+      {expanded && (
+        <CrawlerDetail
+          crawler={crawler}
+          stopping={stopping}
+          onStop={onStop}
+        />
+      )}
     </div>
   );
 }
 
-function CrawlerDetail({ crawler }: { crawler: api.AdminCrawler }) {
+function CrawlerDetail({
+  crawler,
+  stopping,
+  onStop,
+}: {
+  crawler: api.AdminCrawler;
+  stopping: boolean;
+  onStop: () => void;
+}) {
   const scan = crawler.scanGenerationStatus;
   const upload = crawlerUploadDisplayStatus(crawler);
+  const busy = crawlerBusy(crawler);
   return (
     <div className="admin-crawler-detail">
+      {busy && (
+        <div className="admin-crawler-detail__actions">
+          <button className="admin-btn" type="button" onClick={onStop} disabled={stopping}>
+            {stopping ? "暂停中..." : "暂停"}
+          </button>
+        </div>
+      )}
       <div className="admin-crawler-detail__grid">
         <GenStageCard
           label="抓取"
@@ -414,9 +424,7 @@ function CrawlerDetail({ crawler }: { crawler: api.AdminCrawler }) {
           stateText={upload.text}
           counts={[
             { label: "已上传", value: crawler.migratedVideoCount ?? 0 },
-            { label: crawler.uploadDriveId ? "待上传" : "本地保留", value: crawler.localVideoCount ?? 0 },
-            { label: "本轮处理", value: upload.status.doneCount ?? 0 },
-            { label: "本轮总数", value: upload.status.totalCount ?? 0 },
+            { label: "本地保留", value: crawler.localVideoCount ?? 0 },
           ]}
         />
         <GenStageCard
@@ -544,6 +552,17 @@ type EditorForm = {
   uploadDriveId: string;
 };
 
+function editorFormFromCrawler(crawler: api.AdminCrawler | null): EditorForm {
+  return {
+    scriptPath: crawler?.scriptPath ?? "",
+    scriptSourceUrl: crawler?.scriptSourceUrl ?? "",
+    name: crawler?.name ?? "",
+    targetNew: crawler?.targetNew || "10",
+    proxy: crawler?.proxy ?? "",
+    uploadDriveId: crawler?.uploadDriveId ?? "",
+  };
+}
+
 function CrawlerEditorModal({
   open,
   crawler,
@@ -558,14 +577,7 @@ function CrawlerEditorModal({
   onSaved: () => void;
 }) {
   const isEdit = crawler !== null;
-  const [form, setForm] = useState<EditorForm>({
-    scriptPath: "",
-    scriptSourceUrl: "",
-    name: "",
-    targetNew: "10",
-    proxy: "",
-    uploadDriveId: "",
-  });
+  const [form, setForm] = useState<EditorForm>(() => editorFormFromCrawler(crawler));
   const [scriptURL, setScriptURL] = useState("");
   const [importing, setImporting] = useState(false);
   const [replacingScript, setReplacingScript] = useState(false);
@@ -580,14 +592,7 @@ function CrawlerEditorModal({
 
   useEffect(() => {
     if (!open) return;
-    setForm({
-      scriptPath: crawler?.scriptPath ?? "",
-      scriptSourceUrl: crawler?.scriptSourceUrl ?? "",
-      name: crawler?.name ?? "",
-      targetNew: crawler?.targetNew || "10",
-      proxy: crawler?.proxy ?? "",
-      uploadDriveId: crawler?.uploadDriveId ?? "",
-    });
+    setForm(editorFormFromCrawler(crawler));
     setScriptURL("");
     setTestResult(null);
     setDragOver(false);
@@ -595,7 +600,7 @@ function CrawlerEditorModal({
     setScriptUpdated(false);
   }, [open, crawler]);
 
-  // 编辑模式下默认收起导入区，点「替换脚本」再展开
+  // 编辑模式下默认收起导入区，点「替换脚本文件」再展开
   const showImportArea = !isEdit || replacingScript;
   const scriptChanged = form.scriptPath !== (crawler?.scriptPath ?? "");
 
@@ -637,7 +642,7 @@ function CrawlerEditorModal({
   async function importURL() {
     const url = scriptURL.trim();
     if (!url) {
-      show("请填写脚本链接", "error");
+      show("请填写链接", "error");
       return;
     }
     setImporting(true);
@@ -745,7 +750,7 @@ function CrawlerEditorModal({
   }
 
   const footerNote = !form.scriptPath
-    ? { text: "导入脚本后才能保存", tone: "" }
+    ? null
     : testResult?.ok
       ? { text: "测试通过", tone: "is-ok" }
       : testResult
@@ -757,7 +762,7 @@ function CrawlerEditorModal({
   return (
     <Modal
       open={open}
-      title={isEdit ? `编辑爬虫 · ${crawler?.name ?? ""}` : "添加爬虫"}
+      title={isEdit ? (crawler?.name ?? "编辑爬虫") : "添加爬虫"}
       onClose={onClose}
       className="admin-modal--crawler"
       footer={
@@ -797,12 +802,8 @@ function CrawlerEditorModal({
         <div className="admin-crawler-editor__grid">
           <section className="admin-crawler-panel admin-crawler-panel--script">
             <header className="admin-crawler-panel__head">
-              <span className="admin-crawler-panel__icon">
-                <FileCode2 size={15} />
-              </span>
               <div>
-                <strong>脚本来源</strong>
-                <span>{isEdit ? "管理当前脚本或替换版本" : "选择本地文件或脚本链接"}</span>
+                <strong>维护脚本</strong>
               </div>
             </header>
 
@@ -817,85 +818,71 @@ function CrawlerEditorModal({
               }}
             />
 
-            {form.scriptPath && (
+            {isEdit && form.scriptPath && (
               <div className={`admin-crawler-current-script${isEdit && scriptChanged ? " is-replaced" : ""}`}>
-                <div className="admin-crawler-current-script__main">
-                  <span className="admin-crawler-current-script__icon">
-                    <FileCode2 size={16} />
-                  </span>
-                  <div>
-                    <div className="admin-crawler-current-script__title">
-                      <strong>{form.name || "未命名脚本"}</strong>
-                      {isEdit && scriptChanged && <em>新脚本</em>}
-                      {isEdit && !scriptChanged && scriptUpdated && <em>已更新</em>}
-                    </div>
-                  </div>
-                </div>
-
-                {isEdit && (
-                  <div className="admin-crawler-current-script__actions">
-                    {replacingScript ? (
-                      <button type="button" className="admin-btn" onClick={cancelReplace} disabled={importing}>
-                        取消替换
-                      </button>
-                    ) : (
-                      <>
-                        {form.scriptSourceUrl && (
-                          <button
-                            type="button"
-                            className="admin-btn"
-                            onClick={updateFromSource}
-                            disabled={importing}
-                            title={`从 ${form.scriptSourceUrl} 重新拉取脚本`}
-                          >
-                            <RefreshCw size={12} className={importing ? "admin-spin" : undefined} />
-                            {importing ? "更新中..." : "从原链接更新"}
-                          </button>
-                        )}
+                <div className="admin-crawler-current-script__actions">
+                  {replacingScript ? (
+                    <button type="button" className="admin-btn" onClick={cancelReplace} disabled={importing}>
+                      取消替换
+                    </button>
+                  ) : (
+                    <>
+                      {form.scriptSourceUrl && (
                         <button
                           type="button"
                           className="admin-btn"
-                          onClick={() => {
-                            setScriptURL(form.scriptSourceUrl);
-                            setReplacingScript(true);
-                          }}
+                          onClick={updateFromSource}
+                          disabled={importing}
+                          title={`从 ${form.scriptSourceUrl} 重新拉取脚本`}
                         >
-                          <Upload size={12} /> 替换脚本
+                          {importing ? "更新中..." : "从原链接更新"}
                         </button>
-                      </>
-                    )}
-                  </div>
-                )}
+                      )}
+                      <button
+                        type="button"
+                        className="admin-btn"
+                        onClick={() => {
+                          setScriptURL(form.scriptSourceUrl);
+                          setReplacingScript(true);
+                        }}
+                      >
+                        替换脚本文件
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             )}
 
             {showImportArea && (
               <div className="admin-crawler-import-box">
-                <div
-                  className={`admin-crawler-dropzone${dragOver ? " is-dragover" : ""}${importing ? " is-busy" : ""}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => !importing && fileInputRef.current?.click()}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
+                <div className="admin-crawler-local-import">
+                  <span>本地导入</span>
+                  <div
+                    className={`admin-crawler-dropzone${dragOver ? " is-dragover" : ""}${importing ? " is-busy" : ""}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => !importing && fileInputRef.current?.click()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        if (!importing) fileInputRef.current?.click();
+                      }
+                    }}
+                    onDragOver={(e) => {
                       e.preventDefault();
-                      if (!importing) fileInputRef.current?.click();
-                    }
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragOver(true);
-                  }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={onDrop}
-                >
-                  <Upload size={20} />
-                  <strong>{importing ? "导入中..." : "上传 .py 脚本"}</strong>
-                  <span>点击选择或拖拽到这里</span>
+                      setDragOver(true);
+                    }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={onDrop}
+                  >
+                    <Upload size={20} />
+                    <strong>{importing ? "导入中..." : "上传 .py 脚本"}</strong>
+                  </div>
                 </div>
 
                 <div className="admin-crawler-link-import">
-                  <label htmlFor="crawler-script-url">脚本链接</label>
+                  <label htmlFor="crawler-script-url">链接导入</label>
                   <div className="admin-crawler-urlrow">
                     <input
                       id="crawler-script-url"
@@ -907,11 +894,10 @@ function CrawlerEditorModal({
                           importURL();
                         }
                       }}
-                      placeholder="https://example.com/crawler.py"
                       disabled={importing}
                     />
                     <button className="admin-btn" type="button" onClick={importURL} disabled={importing}>
-                      <LinkIcon size={13} /> 链接导入
+                      导入
                     </button>
                   </div>
                 </div>
@@ -922,28 +908,20 @@ function CrawlerEditorModal({
           <div className="admin-crawler-editor__side">
             <section className="admin-crawler-panel">
               <header className="admin-crawler-panel__head">
-                <span className="admin-crawler-panel__icon">
-                  <TestTube size={15} />
-                </span>
                 <div>
                   <strong>测试脚本</strong>
-                  <span>保存前验证抓取结果</span>
                 </div>
               </header>
               <button className="admin-btn" type="button" onClick={test} disabled={!form.scriptPath || importing || testing}>
-                <TestTube size={13} /> {testing ? "测试中..." : testResult ? "重新测试" : "运行测试"}
+                {testing ? "测试中..." : testResult ? "重新测试" : "运行测试"}
               </button>
               {testResult && <CrawlerTestResult result={testResult} />}
             </section>
 
             <section className="admin-crawler-panel">
               <header className="admin-crawler-panel__head">
-                <span className="admin-crawler-panel__icon">
-                  <Activity size={15} />
-                </span>
                 <div>
-                  <strong>运行参数</strong>
-                  <span>抓取数量、代理和上传目标</span>
+                  <strong>配置参数</strong>
                 </div>
               </header>
               <div className="admin-crawler-params">
@@ -967,7 +945,7 @@ function CrawlerEditorModal({
                       set("proxy", e.target.value);
                       setTestResult(null);
                     }}
-                    placeholder="http://127.0.0.1:7890"
+                    placeholder="支持http或socks5代理"
                   />
                 </div>
                 <CrawlerUploadTargetField

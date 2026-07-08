@@ -347,9 +347,136 @@ test("crawler management is a separate admin section", () => {
   assert.match(crawlerPageSource, /export function CrawlersPage/);
   assert.match(crawlerPageSource, /SpiderIcon/);
   assert.match(crawlerPageSource, /添加爬虫/);
-  // 新设计：列表 + Modal 三步编辑器，删除确认走 ConfirmModal，任务进行中自动轮询
+  assert.doesNotMatch(crawlerPageSource, /<h1 className="admin-page__title">爬虫管理<\/h1>/);
+  assert.doesNotMatch(crawlerPageSource, /<RefreshCw size=\{14\}[\s\S]*刷新/);
+  assert.doesNotMatch(crawlerPageSource, /<Plus size=\{1[34]\}/);
+  assert.match(crawlerPageSource, /<header className="admin-page__header">\s*<div className="admin-crawler-global-teaser">/);
+  assert.match(crawlerPageSource, /className="admin-detail-actions-inline admin-crawler-page-actions"/);
+  assert.match(adminCss, /\.admin-crawler-page-actions\s*\{[^}]*margin-left\s*:\s*auto/s);
+  assert.doesNotMatch(crawlerPageSource, /className="admin-btn is-primary"[\s\S]*添加爬虫/);
+  assert.doesNotMatch(crawlerPageSource, /导入脚本 → 测试运行 → 保存启用，三步接入一个新片源/);
+  assert.doesNotMatch(crawlerPageSource, /导入脚本后才能保存/);
+  assert.doesNotMatch(crawlerPageSource, /点击选择或拖拽到这里/);
+  assert.doesNotMatch(crawlerPageSource, /placeholder="https:\/\/example\.com\/crawler\.py"/);
+  assert.doesNotMatch(crawlerPageSource, /选择本地文件或脚本链接|管理当前脚本或替换版本|脚本链接/);
+  assert.doesNotMatch(crawlerPageSource, /保存前验证抓取结果/);
+  assert.doesNotMatch(crawlerPageSource, /抓取数量、代理和上传目标/);
+  assert.match(
+    adminCss,
+    /\.admin-crawler-editor__summary\s*\{[^}]*grid-template-columns\s*:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);[^}]*width\s*:\s*100%;[^}]*align-items\s*:\s*stretch/s
+  );
+  assert.match(
+    adminCss,
+    /\.admin-crawler-editor-status\s*\{[^}]*grid-template-columns\s*:\s*minmax\(0,\s*1fr\);[^}]*justify-items\s*:\s*center;[^}]*text-align\s*:\s*center/s
+  );
+  assert.match(adminCss, /\.admin-crawler-editor-status__icon\s*\{[^}]*display\s*:\s*none/s);
+  assert.doesNotMatch(crawlerPageSource, /admin-crawler-overview/);
+  assert.doesNotMatch(crawlerPageSource, /CrawlerMetric/);
+  assert.doesNotMatch(crawlerPageSource, /已配置爬虫/);
+  assert.match(
+    adminCss,
+    /\.admin-modal\.admin-modal--crawler\s*\{[^}]*border\s*:\s*0;[^}]*box-shadow\s*:\s*none/s
+  );
+  assert.match(
+    adminCss,
+    /\.admin-modal--crawler \.admin-modal__header,[\s\S]*?\.admin-modal--crawler \.admin-modal__footer\s*\{[^}]*border\s*:\s*0;[^}]*background\s*:\s*var\(--bg-surface\)/s
+  );
+  assert.match(
+    adminCss,
+    /\.admin-modal--crawler \.admin-crawler-editor-status,[\s\S]*?\.admin-modal--crawler \.admin-crawler-test-result\s*\{[^}]*border\s*:\s*0;[^}]*box-shadow\s*:\s*none/s
+  );
+  assert.match(
+    adminCss,
+    /\.admin-crawler-current-script\s*\{[^}]*padding\s*:\s*0;[^}]*border\s*:\s*0;[^}]*background\s*:\s*transparent/s
+  );
+  assert.match(crawlerPageSource, /\{isEdit && form\.scriptPath && \(/);
+  assert.doesNotMatch(crawlerPageSource, /admin-crawler-current-script__main|admin-crawler-current-script__title|未命名脚本|\{form\.name \|\|/);
+  assert.doesNotMatch(adminCss, /admin-crawler-current-script__main|admin-crawler-current-script__title/);
+  assert.doesNotMatch(crawlerPageSource, /admin-crawler-current-script__icon/);
+  assert.doesNotMatch(adminCss, /admin-crawler-current-script__icon/);
+  assert.doesNotMatch(adminCss, /\.admin-crawler-current-script\.is-replaced\s*\{[^}]*background/s);
+  assert.doesNotMatch(adminCss, /\.admin-crawler-current-script\.is-replaced \.admin-crawler-current-script__icon/);
+  // 新设计：列表 + 行内展开详情 + Modal 三步编辑器，删除确认走 ConfirmModal，任务进行中按卡片标记
   assert.match(crawlerPageSource, /CrawlerEditorModal/);
+  assert.match(crawlerPageSource, /title=\{isEdit \? \(crawler\?\.name \?\? "编辑爬虫"\) : "添加爬虫"\}/);
+  assert.doesNotMatch(crawlerPageSource, /编辑爬虫 ·/);
+  assert.match(crawlerPageSource, /\{editorTarget !== undefined && \(\s*<CrawlerEditorModal[\s\S]*key=\{editorTarget\?\.id \?\? "new"\}[\s\S]*open/s);
+  assert.match(crawlerPageSource, /useState<EditorForm>\(\(\) => editorFormFromCrawler\(crawler\)\)/);
+  assert.doesNotMatch(crawlerPageSource, /open=\{editorTarget !== undefined\}/);
   assert.match(crawlerPageSource, /ConfirmModal/);
+  assert.match(crawlerPageSource, /const \[detailTargetId, setDetailTargetId\] = useState\(""\)/);
+  assert.doesNotMatch(crawlerPageSource, /<CrawlerDetailModal|function CrawlerDetailModal/);
+  assert.doesNotMatch(crawlerPageSource, /className="admin-modal--crawler-detail"/);
+  assert.doesNotMatch(crawlerPageSource, /className="admin-crawler-detail-modal__actions"/);
+  assert.doesNotMatch(crawlerPageSource, /<Modal open title=\{crawler\.name\}/);
+  assert.doesNotMatch(crawlerPageSource, /爬虫详情 ·/);
+  assert.doesNotMatch(crawlerPageSource, /aria-haspopup="dialog"/);
+  assert.match(crawlerPageSource, /aria-expanded=\{expanded\}/);
+  assert.match(crawlerPageSource, /className=\{`admin-crawler-row \$\{expanded \? "is-expanded" : ""\}`\}/);
+  assert.doesNotMatch(crawlerPageSource, /任务进行中，自动刷新|admin-crawler-list__head|admin-crawler-list__live/);
+  assert.doesNotMatch(adminCss, /admin-crawler-list__head|admin-crawler-list__live/);
+  assert.doesNotMatch(crawlerPageSource, /expandedId|ChevronDown|admin-crawler-row__chevron|admin-crawler-row__delete/);
+  const crawlerRowSource = crawlerPageSource.match(/function CrawlerRow[\s\S]*?(?=function CrawlerDetail\()/)?.[0] ?? "";
+  assert.ok(crawlerRowSource, "crawler row component should exist");
+  assert.match(crawlerRowSource, /const crawling = running \|\| crawler\.scanGenerationStatus\?\.state === "scanning"/);
+  assert.match(crawlerRowSource, /className="admin-crawler-row__title-line"/);
+  assert.match(crawlerRowSource, /className="admin-crawler-row__meta"/);
+  assert.match(crawlerRowSource, /admin-status admin-generation-state is-generating[\s\S]*正在抓取/);
+  assert.match(crawlerRowSource, /暂停使用/);
+  assert.match(crawlerRowSource, /立即抓取/);
+  assert.match(crawlerRowSource, /触发上传/);
+  assert.match(crawlerRowSource, /编辑/);
+  assert.match(crawlerRowSource, /删除/);
+  assert.match(crawlerRowSource, /onClick=\{onUpload\}/);
+  assert.match(crawlerRowSource, /onClick=\{onEdit\}/);
+  assert.match(crawlerRowSource, /onClick=\{onDelete\}/);
+  assert.match(crawlerRowSource, /\{expanded && \(/);
+  assert.doesNotMatch(crawlerRowSource, /上传视频|admin-crawler-row__delete/);
+  const crawlerDetailSource = crawlerPageSource.match(/function CrawlerDetail\([\s\S]*?(?=function crawlerUploadDisplayStatus)/)?.[0] ?? "";
+  assert.ok(crawlerDetailSource, "crawler detail component should exist");
+  assert.match(crawlerDetailSource, /className="admin-crawler-detail__actions"/);
+  assert.match(crawlerDetailSource, /暂停中\.\.\.|暂停/);
+  assert.doesNotMatch(crawlerDetailSource, /className="admin-btn is-stop"|停止中\.\.\.|>\s*停止\s*</);
+  assert.doesNotMatch(crawlerDetailSource, /编辑|删除|触发上传|admin-gen-col__button|action=\{/);
+  assert.doesNotMatch(adminCss, /admin-modal--crawler-detail/);
+  assert.match(
+    adminCss,
+    /\.admin-crawler-detail__actions\s*\{[^}]*display\s*:\s*flex;[^}]*justify-content\s*:\s*flex-end/s
+  );
+  assert.match(
+    adminCss,
+    /\.admin-crawler-row__title-line\s*\{[^}]*display\s*:\s*flex;[^}]*flex-wrap\s*:\s*wrap/s
+  );
+  assert.match(
+    adminCss,
+    /\.admin-crawler-row__meta\s*\{[^}]*overflow\s*:\s*hidden;[^}]*text-overflow\s*:\s*ellipsis;[^}]*white-space\s*:\s*nowrap/s
+  );
+  assert.match(
+    adminCss,
+    /\.admin-crawler-detail__grid\s*\{[^}]*grid-template-columns\s*:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\);[^}]*grid-auto-rows\s*:\s*1fr;[^}]*align-items\s*:\s*stretch/s
+  );
+  assert.doesNotMatch(adminCss, /grid-template-columns\s*:\s*repeat\(6,\s*minmax\(0,\s*1fr\)\)/);
+  assert.doesNotMatch(adminCss, /\.admin-crawler-detail__grid \.admin-gen-col\s*\{[^}]*grid-column\s*:\s*span 2/s);
+  assert.doesNotMatch(adminCss, /min-height\s*:\s*148px/);
+  assert.doesNotMatch(adminCss, /\.admin-crawler-detail__grid \.admin-gen-col:nth-child\(1\)/);
+  assert.doesNotMatch(adminCss, /\.admin-crawler-detail__grid \.admin-gen-col:nth-child\(2\)/);
+  assert.match(adminCss, /\.admin-status\.admin-generation-state\s*\{[^}]*gap\s*:\s*0/s);
+  assert.match(
+    adminCss,
+    /\.admin-status\.admin-generation-state::before\s*\{[^}]*content\s*:\s*none;[^}]*display\s*:\s*none/s
+  );
+  assert.doesNotMatch(adminCss, /admin-gen-col__action|admin-gen-col__button/);
+  const crawlerDeleteModal = crawlerPageSource.match(/<ConfirmModal[\s\S]*?title="删除爬虫"[\s\S]*?\/>/)?.[0] ?? "";
+  assert.ok(crawlerDeleteModal, "crawler delete confirm modal should exist");
+  assert.match(crawlerDeleteModal, /plainConfirm/);
+  assert.match(crawlerDeleteModal, /hideIcon/);
+  assert.doesNotMatch(crawlerDeleteModal, /details=/);
+  assert.doesNotMatch(crawlerDeleteModal, /danger/);
+  assert.doesNotMatch(crawlerDeleteModal, /confirmText=/);
+  assert.doesNotMatch(crawlerDeleteModal, /爬虫配置和脚本文件会被删除|已爬取的视频、封面和预览会保留/);
+  assert.match(confirmModalSource, /plainConfirm \? "" : danger \? " is-danger" : " is-primary"/);
+  assert.match(confirmModalSource, /hideIcon \? " has-no-icon" : ""/);
+  assert.match(adminCss, /\.admin-confirm\.has-no-icon\s*\{[^}]*grid-template-columns\s*:\s*minmax\(0,\s*1fr\)/s);
   assert.doesNotMatch(crawlerPageSource, /window\.confirm/);
   assert.match(crawlerPageSource, /POLL_INTERVAL_MS/);
   assert.match(crawlerPageSource, /api\.listCrawlers/);
@@ -358,27 +485,71 @@ test("crawler management is a separate admin section", () => {
   assert.match(crawlerPageSource, /api\.runCrawler/);
   assert.match(crawlerPageSource, /api\.uploadCrawlerVideos/);
   assert.match(crawlerPageSource, /api\.stopCrawlerTasks/);
+  assert.match(crawlerPageSource, /api\.setCrawlerPaused/);
   assert.match(crawlerPageSource, /api\.deleteCrawler/);
   assert.match(crawlerPageSource, /api\.importCrawlerScriptFile/);
   assert.match(crawlerPageSource, /api\.importCrawlerScriptURL/);
   assert.match(crawlerPageSource, /api\.testCrawlerScript/);
   assert.match(crawlerPageSource, /type="file"/);
-  assert.match(crawlerPageSource, /链接导入/);
+  assert.match(crawlerPageSource, /<button className="admin-btn" type="button" onClick=\{importURL\} disabled=\{importing\}>[\s\S]*导入[\s\S]*<\/button>/);
+  assert.match(crawlerPageSource, /placeholder="支持http或socks5代理"/);
+  assert.doesNotMatch(crawlerPageSource, /LinkIcon/);
+  assert.match(crawlerPageSource, /<div className="admin-crawler-local-import">\s*<span>本地导入<\/span>[\s\S]*?className=\{`admin-crawler-dropzone/);
+  assert.match(crawlerPageSource, /<label htmlFor="crawler-script-url">链接导入<\/label>/);
+  assert.doesNotMatch(crawlerPageSource, /admin-crawler-import-label/);
+  assert.doesNotMatch(adminCss, /admin-crawler-import-label/);
+  assert.match(adminCss, /\.admin-crawler-local-import,[\s\S]*?\.admin-crawler-link-import\s*\{[^}]*display\s*:\s*grid;[^}]*gap\s*:\s*6px/s);
+  assert.match(adminCss, /\.admin-crawler-local-import > span,[\s\S]*?\.admin-crawler-link-import label\s*\{[^}]*font-size\s*:\s*var\(--font-xs\);[^}]*font-weight\s*:\s*var\(--weight-medium\)/s);
+  assert.match(crawlerPageSource, /维护脚本/);
+  assert.doesNotMatch(crawlerPageSource, /脚本来源/);
   assert.match(crawlerPageSource, /测试脚本/);
+  assert.match(crawlerPageSource, /配置参数/);
+  assert.doesNotMatch(crawlerPageSource, /运行参数/);
+  assert.doesNotMatch(crawlerPageSource, /admin-crawler-panel__icon/);
+  assert.doesNotMatch(adminCss, /admin-crawler-panel__icon/);
+  assert.doesNotMatch(crawlerPageSource, /<Activity/);
+  assert.doesNotMatch(crawlerPageSource, /<TestTube size=\{13\} \/>\s*\{testing \?/);
   assert.match(crawlerPageSource, /测试通过/);
+  assert.match(crawlerPageSource, /从原链接更新/);
+  assert.match(crawlerPageSource, /替换脚本文件/);
+  assert.doesNotMatch(crawlerPageSource, />\s*替换脚本\s*</);
+  assert.doesNotMatch(crawlerPageSource, /<RefreshCw size=\{12\} className=\{importing \? "admin-spin" : undefined\} \/>/);
+  assert.doesNotMatch(crawlerPageSource, /<Upload size=\{12\} \/>\s*替换脚本文件/);
   assert.match(crawlerPageSource, /CrawlerUploadTargetField/);
   assert.match(crawlerPageSource, /uploadDriveId/);
   assert.match(crawlerPageSource, /api\.setDriveTeaserEnabled/);
-  assert.match(crawlerPageSource, /admin-crawler-preview-card-toggle/);
-  assert.match(crawlerPageSource, /预览：开/);
-  assert.match(crawlerPageSource, /预览：关/);
-  assert.match(crawlerPageSource, /上传视频/);
-  assert.match(crawlerPageSource, /aria-pressed=\{crawler\.teaserEnabled\}/);
+  assert.match(crawlerPageSource, /toggleCrawlerTeasers/);
+  assert.match(crawlerPageSource, /className="admin-crawler-global-teaser"/);
+  assert.match(crawlerPageSource, /className=\{`toggle-switch \$\{allCrawlerTeasersEnabled \? "is-on" : ""\}/);
+  assert.match(crawlerPageSource, /role="switch"/);
+  assert.match(crawlerPageSource, /aria-checked=\{allCrawlerTeasersEnabled\}/);
+  assert.match(crawlerPageSource, /className="toggle-switch__dot"/);
+  assert.match(crawlerPageSource, /预览视频/);
+  assert.doesNotMatch(crawlerPageSource, /admin-crawler-preview-card-toggle/);
+  assert.doesNotMatch(crawlerPageSource, /预览：开/);
+  assert.doesNotMatch(crawlerPageSource, /预览：关/);
+  assert.match(crawlerPageSource, /触发上传/);
+  assert.match(crawlerPageSource, /暂停使用/);
+  assert.match(crawlerPageSource, /恢复使用/);
+  assert.doesNotMatch(crawlerPageSource, /<Download size=\{13\} \/>\s*\{running \? "触发中\.\.\." : "立即抓取"\}/);
+  assert.doesNotMatch(crawlerPageSource, /<Upload size=\{13\} \/>\s*\{uploading \? "上传中\.\.\." : "上传视频"\}/);
+  assert.doesNotMatch(crawlerPageSource, /<Pencil size=\{13\} \/>\s*编辑/);
+  assert.doesNotMatch(crawlerPageSource, /aria-pressed=\{crawler\.teaserEnabled\}/);
   assert.doesNotMatch(crawlerPageSource, /crawlerUploadBlockedReason/);
   assert.doesNotMatch(crawlerPageSource, /disabled=\{uploading/);
   assert.doesNotMatch(crawlerPageSource, /crawlerStatusLabel/);
+  assert.match(crawlerPageSource, /\{ label: "已上传", value: crawler\.migratedVideoCount \?\? 0 \}/);
+  assert.match(crawlerPageSource, /\{ label: "本地保留", value: crawler\.localVideoCount \?\? 0 \}/);
+  assert.doesNotMatch(crawlerPageSource, /label: crawler\.uploadDriveId \? "待上传" : "本地保留"/);
+  assert.doesNotMatch(crawlerPageSource, /label: "本轮处理"/);
+  assert.doesNotMatch(crawlerPageSource, /label: "本轮总数"/);
   assert.doesNotMatch(crawlerPageSource, /admin-crawler-preview-card-toggle \$\{crawler\.teaserEnabled/);
   assert.doesNotMatch(adminCss, /admin-crawler-preview-card-toggle\.is-on/);
+  assert.match(adminCss, /\.admin-crawler-global-teaser\s*\{[^}]*display\s*:\s*inline-grid;[^}]*justify-items\s*:\s*center/s);
+  assert.match(adminCss, /\.admin-crawler-console\s*\{[^}]*width\s*:\s*min\(100%,\s*920px\);[^}]*margin-inline\s*:\s*auto/s);
+  assert.match(adminCss, /\.admin-crawler-list\s*\{[^}]*border\s*:\s*0;[^}]*background\s*:\s*transparent;[^}]*box-shadow\s*:\s*none/s);
+  assert.match(adminCss, /\.admin-crawler-table\s*\{[^}]*display\s*:\s*grid;[^}]*gap\s*:\s*var\(--space-3\);[^}]*padding\s*:\s*var\(--space-4\)/s);
+  assert.match(adminCss, /\.admin-crawler-row\s*\{[^}]*border\s*:\s*1px solid var\(--border-subtle\);[^}]*border-radius\s*:\s*var\(--radius-sm\)/s);
   assert.doesNotMatch(crawlerPageSource, /admin-crawler-pipeline/);
   assert.doesNotMatch(adminCss, /admin-crawler-(pipeline|stage)/);
   assert.doesNotMatch(crawlerPageSource, /teaserEnabled: form\.teaserEnabled/);
@@ -398,10 +569,12 @@ test("crawler management is a separate admin section", () => {
   assert.doesNotMatch(crawlerPageSource, /内置 91/);
   assert.match(apiSource, /type AdminCrawler/);
   assert.match(apiSource, /uploadDriveId\?: string/);
+  assert.match(apiSource, /paused: boolean/);
   assert.match(apiSource, /teaserEnabled: boolean/);
   assert.doesNotMatch(apiSource, /teaserEnabled\?: boolean/);
   assert.match(apiSource, /"\/crawlers"/);
   assert.match(apiSource, /\/crawlers\/\$\{encodeURIComponent\(id\)\}\/upload/);
+  assert.match(apiSource, /\/crawlers\/\$\{encodeURIComponent\(id\)\}\/paused/);
   assert.match(apiSource, /"\/crawlers\/import-file"/);
   assert.match(apiSource, /"\/crawlers\/import-url"/);
   assert.match(apiSource, /"\/crawlers\/test-script"/);
@@ -509,6 +682,18 @@ test("drive list actions use ordinary text buttons in the requested positions", 
   );
   assert.match(adminCss, /\.admin-drive-list-actions\s*\{[^}]*justify-content\s*:\s*space-between/s);
   assert.doesNotMatch(adminCss, /\.admin-drive-footer-actions/);
+});
+
+test("empty drive list renders no placeholder card", () => {
+  const listViewStart = drivesPageSource.indexOf("// --- List view ---");
+  const modalStart = drivesPageSource.indexOf("<Modal", listViewStart);
+  assert.ok(listViewStart > -1, "list view branch should be present");
+  assert.ok(modalStart > listViewStart, "list view modal should follow list content");
+
+  const listViewSource = drivesPageSource.slice(listViewStart, modalStart);
+  assert.doesNotMatch(listViewSource, /请添加网盘|当前还没有配置任何网盘/);
+  assert.doesNotMatch(listViewSource, /className="admin-card admin-empty"/);
+  assert.match(listViewSource, /list\.length > 0 \? \(/);
 });
 
 test("drive management status pills omit the leading status dot", () => {

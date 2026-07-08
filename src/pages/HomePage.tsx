@@ -194,7 +194,7 @@ export default function HomePage() {
         <div className="container page-section home-primary-section">
           <div className="home-empty" role="status">
             <Film size={30} aria-hidden="true" />
-            <span>当前还没有可播放的视频</span>
+            <span>当前没有可播放视频</span>
           </div>
         </div>
       ) : (

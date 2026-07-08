@@ -10,6 +10,8 @@ type ConfirmModalProps = {
   confirmText?: string;
   cancelText?: string;
   danger?: boolean;
+  plainConfirm?: boolean;
+  hideIcon?: boolean;
   centerMessage?: boolean;
   modalClassName?: string;
   loading?: boolean;
@@ -27,6 +29,8 @@ export function ConfirmModal({
   confirmText = "确认",
   cancelText = "取消",
   danger = false,
+  plainConfirm = false,
+  hideIcon = false,
   centerMessage = false,
   modalClassName = "",
   loading = false,
@@ -49,7 +53,7 @@ export function ConfirmModal({
           </button>
           <button
             type="button"
-            className={`admin-btn${danger ? " is-danger" : " is-primary"}`}
+            className={`admin-btn${plainConfirm ? "" : danger ? " is-danger" : " is-primary"}`}
             onClick={onConfirm}
             disabled={loading}
           >
@@ -58,10 +62,12 @@ export function ConfirmModal({
         </>
       }
     >
-      <div className={`admin-confirm${centerMessage ? " is-message-centered" : ""}`}>
-        <div className={`admin-confirm__icon${danger ? " is-danger" : ""}`} aria-hidden={centerMessage}>
-          <AlertTriangle size={20} />
-        </div>
+      <div className={`admin-confirm${centerMessage ? " is-message-centered" : ""}${hideIcon ? " has-no-icon" : ""}`}>
+        {!hideIcon && (
+          <div className={`admin-confirm__icon${danger ? " is-danger" : ""}`} aria-hidden={centerMessage}>
+            <AlertTriangle size={20} />
+          </div>
+        )}
         <div className="admin-confirm__content">
           <p className="admin-confirm__message">{message}</p>
           {details && details.length > 0 && (
