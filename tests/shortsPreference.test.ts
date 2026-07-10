@@ -573,6 +573,23 @@ test("Windows viewport resize keeps the current short aligned", () => {
   );
 });
 
+test("shorts back button exits document fullscreen before showing home", () => {
+  assert.match(shortsPageSource, /import \{ Link, useNavigate \} from "react-router-dom";/);
+  assert.match(shortsPageSource, /const navigate = useNavigate\(\);/);
+  assert.match(
+    shortsPageSource,
+    /const handleBackToHomeClick = useCallback\([\s\S]*?const exitRequest = exitDocumentFullscreen\(\);[\s\S]*?if \(!exitRequest\) return;[\s\S]*?event\.preventDefault\(\);[\s\S]*?exitRequest\.then\(returnHome, returnHome\)/
+  );
+  assert.match(
+    shortsPageSource,
+    /function exitDocumentFullscreen\(\): Promise<void> \| null \{[\s\S]*?fullscreenDocument\.fullscreenElement \?\?[\s\S]*?fullscreenDocument\.webkitFullscreenElement[\s\S]*?fullscreenDocument\.exitFullscreen\?\.bind[\s\S]*?fullscreenDocument\.webkitExitFullscreen\?\.bind[\s\S]*?Promise\.resolve\(exitFullscreen\(\)\)/
+  );
+  assert.match(
+    shortsPageSource,
+    /<Link\s*to="\/"[\s\S]*?className="shorts-header__back"[\s\S]*?onClick=\{handleBackToHomeClick\}/
+  );
+});
+
 test("shorts page defaults to immersive playback without fullscreen controls", () => {
   assert.match(shortsPageSource, /const activeIndexRef = useRef\(0\)/);
   assert.match(shortsCssSource, /\.shorts-page \{[\s\S]*height:\s*100svh/);
@@ -584,5 +601,4 @@ test("shorts page defaults to immersive playback without fullscreen controls", (
   assert.doesNotMatch(shortsPageSource, /aria-label=\{isFullscreen \? "退出全屏" : "进入全屏"\}/);
   assert.doesNotMatch(shortsPageSource, /e\.key === "f"/);
   assert.doesNotMatch(shortsPageSource, /requestFullscreen/);
-  assert.doesNotMatch(shortsPageSource, /exitFullscreen/);
 });

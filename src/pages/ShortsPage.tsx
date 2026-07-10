@@ -5,7 +5,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
   Heart,
@@ -89,6 +89,7 @@ function saveSeenIds(ids: string[]) {
 
 export default function ShortsPage() {
   const { isAdmin } = useAuth();
+  const navigate = useNavigate();
   // 已加入页面的视频队列（按出现顺序）
   const [items, setItems] = useState<ShortsItem[]>([]);
   // 当前在视口里的视频索引
@@ -194,6 +195,21 @@ export default function ShortsPage() {
   // iOS/WebKit 的有声播放授权按 media element 管理。iOS 分支始终复用
   // 同一个真实 <video>，滑动时只移动节点并更换 src。
   const useIOSSharedVideo = shouldUseIOSSharedVideo();
+
+  const handleBackToHomeClick = useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      // 主页导航点击 documentElement 后进入的是“文档全屏”，SPA 路由切换
+      // 不会自动退出。先等待 Fullscreen API 完成，再渲染首页，避免首页继承
+      // 短视频的全屏状态或先以全屏闪现。
+      const exitRequest = exitDocumentFullscreen();
+      if (!exitRequest) return;
+
+      event.preventDefault();
+      const returnHome = () => navigate("/");
+      void exitRequest.then(returnHome, returnHome);
+    },
+    [navigate]
+  );
 
   function getVideoAtIndex(index: number) {
     if (useIOSSharedVideo && index === activeIndexRef.current) {
@@ -783,7 +799,12 @@ export default function ShortsPage() {
       className={`shorts-page${useDocumentScroll ? " is-document-scroll" : ""}`}
     >
       <header className="shorts-header">
-        <Link to="/" className="shorts-header__back" aria-label="返回首页">
+        <Link
+          to="/"
+          className="shorts-header__back"
+          aria-label="返回首页"
+          onClick={handleBackToHomeClick}
+        >
           <ChevronLeft size={22} />
         </Link>
         <div className="shorts-header__actions">
@@ -2611,6 +2632,29 @@ function isWindowsPlatform() {
   const platform = navigator.platform || "";
   const ua = navigator.userAgent || "";
   return /^Win/i.test(platform) || /\bWindows\b/i.test(ua);
+}
+
+type WebkitFullscreenDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+};
+
+function exitDocumentFullscreen(): Promise<void> | null {
+  if (typeof document === "undefined") return null;
+  const fullscreenDocument = document as WebkitFullscreenDocument;
+  const fullscreenElement =
+    fullscreenDocument.fullscreenElement ??
+    fullscreenDocument.webkitFullscreenElement;
+  const exitFullscreen =
+    fullscreenDocument.exitFullscreen?.bind(fullscreenDocument) ??
+    fullscreenDocument.webkitExitFullscreen?.bind(fullscreenDocument);
+  if (!fullscreenElement || !exitFullscreen) return null;
+
+  try {
+    return Promise.resolve(exitFullscreen());
+  } catch (error) {
+    return Promise.reject(error);
+  }
 }
 
 function shouldUseIOSSharedVideo() {

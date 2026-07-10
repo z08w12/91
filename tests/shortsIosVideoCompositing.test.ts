@@ -36,7 +36,6 @@ test("iPhone browser uses document scrolling without manual fullscreen controls"
   assert.match(shortsPageSource, /root:\s*null/);
   assert.doesNotMatch(shortsPageSource, /supportsElementFullscreenAPI/);
   assert.doesNotMatch(shortsPageSource, /requestFullscreen/);
-  assert.doesNotMatch(shortsPageSource, /exitFullscreen/);
   assert.doesNotMatch(shortsPageSource, /aria-label=\{isFullscreen \? "退出全屏" : "进入全屏"\}/);
   assert.doesNotMatch(shortsPageSource, /function handleFullscreenButtonPointerDown/);
   assert.doesNotMatch(shortsPageSource, /onPointerDown=\{handleFullscreenButtonPointerDown\}/);
