@@ -39,6 +39,21 @@ test("shorts progress dragging uses immediate pointer state", () => {
   assert.match(shortsPageSource, /onLostPointerCapture=\{handleProgressPointerEnd\}/);
 });
 
+test("mobile shorts scrubbing time is shown at the top", () => {
+  assert.match(
+    shortsPageSource,
+    /\{scrubbing && isActive && shouldLoad && !isMarkedHidden && \(\s*<div className="shorts-slide__progress-time" aria-live="polite">\s*\{formatClock\(currentTime\)\} \/ \{formatClock\(duration\)\}/
+  );
+  assert.doesNotMatch(
+    shortsPageSource,
+    /className=\{`shorts-slide__progress[\s\S]*?<div className="shorts-slide__progress-time"/
+  );
+  assert.match(
+    shortsCssSource,
+    /@media \(hover: none\) and \(pointer: coarse\) \{\s*\.shorts-slide__progress-time \{\s*top: calc\(env\(safe-area-inset-top\) \+ 76px\);\s*bottom: auto;/
+  );
+});
+
 test("shorts horizontal video swipe seeks relative to the current playback time", () => {
   assert.match(shortsPageSource, /const SHORTS_SEEK_ACTIVATION_PX = 12;/);
   assert.match(shortsPageSource, /const SHORTS_SEEK_DIRECTION_LOCK_RATIO = 1\.2;/);
@@ -77,7 +92,7 @@ test("shorts progress listeners rebind when deferred videos mount", () => {
   assert.match(shortsPageSource, /if \(!shouldMount\) \{\s*setDuration\(0\);\s*setCurrentTime\(0\);/);
   assert.match(
     shortsPageSource,
-    /getVideoElement,[\s\S]*?shouldLoad,[\s\S]*?shouldMount,[\s\S]*?usesSharedVideo,[\s\S]*?volume,[\s\S]*?\]\);/
+    /getVideoElement,[\s\S]*?shouldLoad,[\s\S]*?shouldMount,[\s\S]*?usesSharedVideo,[\s\S]*?\]\);/
   );
 });
 
@@ -154,6 +169,34 @@ test("shorts keyboard play pause does not show a toast", () => {
   const keyboardBlock = /else if \(e\.key === " "\) \{[\s\S]*?\} else if \(e\.key === "m"/.exec(shortsPageSource);
   assert.ok(keyboardBlock, "space key handler should be present");
   assert.doesNotMatch(keyboardBlock[0], /showHud\("播放"|showHud\("暂停"/);
+});
+
+test("Windows held arrow-key seeking shows progress at the top", () => {
+  assert.match(
+    shortsPageSource,
+    /const \[keyboardSeekPreview, setKeyboardSeekPreview\] = useState<[\s\S]*?currentTime: number;[\s\S]*?duration: number;/
+  );
+  assert.match(
+    shortsPageSource,
+    /e\.key === "ArrowRight"[\s\S]*?activeVideo\.currentTime = newTime;[\s\S]*?if \(isWindowsShortsPlatform\) \{\s*showKeyboardSeekPreview\(newTime, activeVideo\.duration\);/
+  );
+  assert.match(
+    shortsPageSource,
+    /e\.key === "ArrowLeft"[\s\S]*?activeVideo\.currentTime = newTime;[\s\S]*?if \(isWindowsShortsPlatform\) \{\s*showKeyboardSeekPreview\(newTime, activeVideo\.duration\);/
+  );
+  assert.match(
+    shortsPageSource,
+    /const handleKeyUp = \(e: KeyboardEvent\) => \{[\s\S]*?SHORTS_KEYBOARD_SEEK_RELEASE_HIDE_MS/
+  );
+  assert.match(shortsPageSource, /window\.addEventListener\("keyup", handleKeyUp\);/);
+  assert.match(
+    shortsPageSource,
+    /className="shorts-keyboard-seek-time" aria-live="polite"[\s\S]*?formatClock\(keyboardSeekPreview\.currentTime\)[\s\S]*?formatClock\(keyboardSeekPreview\.duration\)/
+  );
+  assert.match(
+    shortsCssSource,
+    /\.shorts-keyboard-seek-time \{\s*top: calc\(env\(safe-area-inset-top\) \+ 76px\);\s*z-index: 40;/
+  );
 });
 
 test("shorts play pause does not render transient center hud", () => {
@@ -451,7 +494,7 @@ test("shorts grants preload only after the active video really started", () => {
 });
 
 test("shorts sound toggle grants playback in the direct user click", () => {
-  assert.match(shortsPageSource, /function applyVideoAudioState/);
+  assert.match(shortsPageSource, /function applyVideoMutedState/);
   assert.doesNotMatch(shortsPageSource, /onFirstPointer/);
   assert.doesNotMatch(shortsPageSource, /currentPage\.addEventListener\("pointerdown"/);
   assert.match(
@@ -468,19 +511,34 @@ test("shorts sound toggle grants playback in the direct user click", () => {
   assert.match(shortsPageSource, /getVideoAtIndex\(activeIndexRef\.current\) === activeVideo/);
   assert.match(
     shortsPageSource,
-    /applyVideoAudioState\(activeVideo, next, volume\);[\s\S]*?activeVideo\.play\(\)\.catch[\s\S]*?setMuted\(next\);/
+    /applyVideoMutedState\(activeVideo, next\);[\s\S]*?activeVideo\.play\(\)\.catch[\s\S]*?setMuted\(next\);/
   );
   assert.match(shortsPageSource, /stabilizeVideoAfterAudioToggle\(\s*activeVideo,\s*canResumeActiveVideo\s*\);/);
   assert.match(shortsPageSource, /if \(shouldResume\(\) && video\.paused && !video\.ended\) \{/);
   assert.match(shortsPageSource, /for \(const delay of \[80, 240, 600\]\)/);
   assert.match(
     shortsPageSource,
-    /const sharedVideo = iosSharedVideoRef\.current;\s*if \(sharedVideo\) applyVideoAudioState\(sharedVideo, muted, volume\);/
+    /const sharedVideo = iosSharedVideoRef\.current;\s*if \(sharedVideo\) applyVideoMutedState\(sharedVideo, muted\);/
   );
-  assert.match(shortsPageSource, /\}, \[muted, volume, items\.length, useIOSSharedVideo\]\);/);
+  assert.match(shortsPageSource, /\}, \[muted, items\.length, useIOSSharedVideo\]\);/);
 });
 
-test("Windows shorts header renders an icon-only volume control", () => {
+test("shorts leaves loudness to the system and only exposes mute", () => {
+  assert.match(
+    shortsPageSource,
+    /<button[\s\S]*?className="shorts-header__icon-btn"[\s\S]*?aria-label=\{muted \? "取消静音" : "静音"\}[\s\S]*?handleMuteButtonClick\(\);/
+  );
+  assert.doesNotMatch(shortsPageSource, /type="range"/);
+  assert.doesNotMatch(shortsPageSource, /handleVolumeSliderChange|setVolume|volumeRef/);
+  assert.doesNotMatch(shortsPageSource, /video\.volume\s*=/);
+  assert.doesNotMatch(shortsCssSource, /shorts-header__volume-slider|shorts-header__volume-group/);
+  assert.match(
+    shortsPageSource,
+    /function applyVideoMutedState\(video: HTMLVideoElement, nextMuted: boolean\) \{[\s\S]*?video\.muted = nextMuted;/
+  );
+});
+
+test("Windows viewport resize keeps the current short aligned", () => {
   assert.match(
     shortsPageSource,
     /const isWindowsShortsPlatform = isWindowsPlatform\(\);/
@@ -489,17 +547,6 @@ test("Windows shorts header renders an icon-only volume control", () => {
     shortsPageSource,
     /function isWindowsPlatform\(\) \{[\s\S]*?\/\^Win\/i\.test\(platform\) \|\| \/\\bWindows\\b\/i\.test\(ua\);/
   );
-  assert.match(
-    shortsPageSource,
-    /\{!isWindowsShortsPlatform && \(\s*<div className="shorts-header__volume-slider-container">/
-  );
-  assert.match(
-    shortsPageSource,
-    /<button[\s\S]*?className="shorts-header__icon-btn"[\s\S]*?handleVolumeButtonClick\(\);/
-  );
-});
-
-test("Windows viewport resize keeps the current short aligned", () => {
   assert.match(
     shortsPageSource,
     /const viewportResizeAnchorIndexRef = useRef<number \| null>\(null\);/

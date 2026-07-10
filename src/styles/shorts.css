@@ -138,70 +138,6 @@ body.shorts-document-scroll::before {
   gap: 12px;
 }
 
-/* 桌面端音量条容器 */
-.shorts-header__volume-group {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.shorts-header__volume-slider-container {
-  position: absolute;
-  right: calc(100% + 8px);
-  background: rgba(0, 0, 0, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  padding: 8px 12px;
-  border-radius: 99px;
-  display: flex;
-  align-items: center;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(10px) scale(0.95);
-  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-}
-
-.shorts-header__volume-group:hover .shorts-header__volume-slider-container,
-.shorts-header__volume-slider-container:hover {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateX(0) scale(1);
-}
-
-@media (max-width: 768px) {
-  .shorts-header__volume-slider-container {
-    display: none !important;
-  }
-}
-
-.shorts-header__volume-slider {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 80px;
-  height: 4px;
-  background: rgba(255, 255, 255, 0.3);
-  border-radius: 2px;
-  outline: none;
-  cursor: pointer;
-}
-
-.shorts-header__volume-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 0 6px rgba(255, 255, 255, 0.8);
-  transition: transform 0.1s;
-}
-
-.shorts-header__volume-slider::-webkit-slider-thumb:hover {
-  transform: scale(1.2);
-}
-
 /* ---------- feed 列表 ---------- */
 .shorts-feed {
   flex: 1;
@@ -724,10 +660,10 @@ body.shorts-document-scroll::before {
   box-shadow: 0 0 10px rgba(255, 64, 96, 0.6);
 }
 
-/* 拖拽seek时间提示气泡 */
-.shorts-slide__progress-time {
+/* 拖拽 / 键盘 seek 时间提示气泡 */
+.shorts-slide__progress-time,
+.shorts-keyboard-seek-time {
   position: absolute;
-  bottom: 24px;
   left: 50%;
   transform: translateX(-50%) scale(0.9);
   padding: 6px 14px;
@@ -744,6 +680,25 @@ body.shorts-document-scroll::before {
   pointer-events: none;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   animation: shorts-tooltip-pop 150ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.shorts-slide__progress-time {
+  bottom: calc(env(safe-area-inset-bottom) + 38px);
+  z-index: 17;
+}
+
+.shorts-keyboard-seek-time {
+  top: calc(env(safe-area-inset-top) + 76px);
+  z-index: 40;
+}
+
+/* 触屏设备左右滑动调整进度时，把时间放在顶部控制区下方；既避开
+   刘海/状态栏，也不会被底部进度条和系统 Home 指示条遮挡。 */
+@media (hover: none) and (pointer: coarse) {
+  .shorts-slide__progress-time {
+    top: calc(env(safe-area-inset-top) + 76px);
+    bottom: auto;
+  }
 }
 
 @keyframes shorts-tooltip-pop {

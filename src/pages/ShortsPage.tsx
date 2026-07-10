@@ -64,6 +64,8 @@ const SHORTS_BUFFERING_INDICATOR_DELAY_MS = 180;
 // touchend / mouseup 之后浏览器还会补发 click。长按倍速和拖动进度已经
 // 消费了这次手势，必须拦住这个合成 click，否则单击逻辑会把视频暂停。
 const SHORTS_SYNTHETIC_CLICK_RESET_MS = 700;
+const SHORTS_KEYBOARD_SEEK_IDLE_HIDE_MS = 1200;
+const SHORTS_KEYBOARD_SEEK_RELEASE_HIDE_MS = 400;
 
 function loadSeenIds(): string[] {
   try {
@@ -93,11 +95,14 @@ export default function ShortsPage() {
   const [activeIndex, setActiveIndex] = useState(0);
   // 是否静音；首次必须静音才能 autoplay，用户点击后切换
   const [muted, setMuted] = useState(true);
-  // 音量大小 (0 ~ 1)
-  const [volume, setVolume] = useState(0.8);
   // 全局 Toast / HUD 提醒文字
   const [hudText, setHudText] = useState<{ id: number; text: string; icon?: React.ReactNode } | null>(null);
   const hudTimeoutRef = useRef<number | null>(null);
+  const [keyboardSeekPreview, setKeyboardSeekPreview] = useState<{
+    currentTime: number;
+    duration: number;
+  } | null>(null);
+  const keyboardSeekHideTimerRef = useRef<number | null>(null);
 
   const showHud = useCallback((text: string, icon?: React.ReactNode) => {
     if (hudTimeoutRef.current) window.clearTimeout(hudTimeoutRef.current);
@@ -111,7 +116,7 @@ export default function ShortsPage() {
     e.stopPropagation();
   }, []);
 
-  const handleVolumeButtonClick = useCallback(() => {
+  const handleMuteButtonClick = useCallback(() => {
     const activeVideo = getVideoAtIndex(activeIndex);
     const canResumeActiveVideo = () =>
       Boolean(activeVideo) &&
@@ -120,7 +125,7 @@ export default function ShortsPage() {
     const next = !muted;
     if (activeVideo) {
       normalizeVideoPlaybackRate(activeVideo);
-      applyVideoAudioState(activeVideo, next, volume);
+      applyVideoMutedState(activeVideo, next);
       // 必须直接发生在这个 click 回调中：这一次 play() 给 iOS 的持久
       // media element 授予有声播放权限，之后切 src 仍复用同一元素。
       if (canResumeActiveVideo()) {
@@ -136,38 +141,15 @@ export default function ShortsPage() {
       next ? "已静音" : "音量已开启",
       next ? <VolumeX size={16} /> : <Volume2 size={16} />
     );
-  }, [activeIndex, muted, showHud, volume]);
-
-  const handleVolumeSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = parseFloat(e.target.value);
-    setVolume(val);
-    if (val > 0) {
-      setMuted(false);
-    } else {
-      setMuted(true);
-    }
-    // Update active video volume directly
-    const activeVideo = getVideoAtIndex(activeIndex);
-    if (activeVideo) {
-      normalizeVideoPlaybackRate(activeVideo);
-      applyVideoAudioState(activeVideo, val === 0, val);
-      const canResumeActiveVideo = () =>
-        getVideoAtIndex(activeIndexRef.current) === activeVideo &&
-        userPausedIndexRef.current !== activeIndexRef.current;
-      if (canResumeActiveVideo()) {
-        activeVideo.play().catch(() => undefined);
-      }
-      stabilizeVideoAfterAudioToggle(
-        activeVideo,
-        canResumeActiveVideo
-      );
-    }
-  }, [activeIndex]);
+  }, [activeIndex, muted, showHud]);
 
   // 组件卸载时清理 HUD 定时器
   useEffect(() => {
     return () => {
       if (hudTimeoutRef.current) window.clearTimeout(hudTimeoutRef.current);
+      if (keyboardSeekHideTimerRef.current !== null) {
+        window.clearTimeout(keyboardSeekHideTimerRef.current);
+      }
     };
   }, []);
 
@@ -491,17 +473,37 @@ export default function ShortsPage() {
     });
   }, [activeIndex, items.length]);
 
-  // 单独同步音频属性。这里不做 play/pause，避免手机端切换静音时打断播放节奏。
+  // 只同步静音属性。页面不读写 video.volume，实际响度完全交给系统音量。
+  // 这里不做 play/pause，避免手机端切换静音时打断播放节奏。
   useEffect(() => {
     const sharedVideo = iosSharedVideoRef.current;
-    if (sharedVideo) applyVideoAudioState(sharedVideo, muted, volume);
+    if (sharedVideo) applyVideoMutedState(sharedVideo, muted);
     videoRefs.current.forEach((video) => {
-      applyVideoAudioState(video, muted, volume);
+      applyVideoMutedState(video, muted);
     });
-  }, [muted, volume, items.length, useIOSSharedVideo]);
+  }, [muted, items.length, useIOSSharedVideo]);
 
   // 键盘快捷键监听
   useEffect(() => {
+    const scheduleKeyboardSeekPreviewHide = (delay: number) => {
+      if (keyboardSeekHideTimerRef.current !== null) {
+        window.clearTimeout(keyboardSeekHideTimerRef.current);
+      }
+      keyboardSeekHideTimerRef.current = window.setTimeout(() => {
+        keyboardSeekHideTimerRef.current = null;
+        setKeyboardSeekPreview(null);
+      }, delay);
+    };
+
+    const showKeyboardSeekPreview = (
+      currentTime: number,
+      duration: number
+    ) => {
+      setKeyboardSeekPreview({ currentTime, duration });
+      // keyup 可能因窗口失焦而丢失；长按期间 repeat 会持续重置这个兜底。
+      scheduleKeyboardSeekPreviewHide(SHORTS_KEYBOARD_SEEK_IDLE_HIDE_MS);
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement;
       if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) {
@@ -543,7 +545,7 @@ export default function ShortsPage() {
         }
       } else if (e.key === "m" || e.key === "M") {
         e.preventDefault();
-        handleVolumeButtonClick();
+        handleMuteButtonClick();
       } else if (e.key === "l" || e.key === "L") {
         e.preventDefault();
         const heartBtn = containerRef.current?.querySelector(`[data-index="${activeIndex}"] .shorts-slide__action`) as HTMLButtonElement | null;
@@ -556,7 +558,11 @@ export default function ShortsPage() {
         if (activeVideo && activeVideo.duration) {
           const newTime = Math.min(activeVideo.duration, activeVideo.currentTime + 5);
           activeVideo.currentTime = newTime;
-          showHud("+5秒", <Sparkles size={16} />);
+          if (isWindowsShortsPlatform) {
+            showKeyboardSeekPreview(newTime, activeVideo.duration);
+          } else {
+            showHud("+5秒", <Sparkles size={16} />);
+          }
         }
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
@@ -564,14 +570,40 @@ export default function ShortsPage() {
         if (activeVideo && activeVideo.duration) {
           const newTime = Math.max(0, activeVideo.currentTime - 5);
           activeVideo.currentTime = newTime;
-          showHud("-5秒", <Sparkles size={16} />);
+          if (isWindowsShortsPlatform) {
+            showKeyboardSeekPreview(newTime, activeVideo.duration);
+          } else {
+            showHud("-5秒", <Sparkles size={16} />);
+          }
         }
       }
     };
 
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (
+        isWindowsShortsPlatform &&
+        (e.key === "ArrowRight" || e.key === "ArrowLeft")
+      ) {
+        scheduleKeyboardSeekPreviewHide(
+          SHORTS_KEYBOARD_SEEK_RELEASE_HIDE_MS
+        );
+      }
+    };
+
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeIndex, items, showHud, handleVolumeButtonClick, setUserPausedForIndex]);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [
+    activeIndex,
+    handleMuteButtonClick,
+    isWindowsShortsPlatform,
+    items,
+    setUserPausedForIndex,
+    showHud,
+  ]);
 
   // 页面卸载时暂停所有
   useEffect(() => {
@@ -648,7 +680,7 @@ export default function ShortsPage() {
     }
 
     slot.appendChild(video);
-    applyVideoAudioState(video, muted, volume);
+    applyVideoMutedState(video, muted);
     try {
       video.defaultMuted = muted;
     } catch {
@@ -668,7 +700,7 @@ export default function ShortsPage() {
     } else if (video.getAttribute("poster") !== item.poster) {
       video.poster = item.poster;
     }
-  }, [activeIndex, items, muted, volume, useIOSSharedVideo]);
+  }, [activeIndex, items, muted, useIOSSharedVideo]);
 
   useLayoutEffect(() => {
     return () => {
@@ -755,39 +787,23 @@ export default function ShortsPage() {
           <ChevronLeft size={22} />
         </Link>
         <div className="shorts-header__actions">
-          <div className="shorts-header__volume-group">
-            {!isWindowsShortsPlatform && (
-              <div className="shorts-header__volume-slider-container">
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  value={muted ? 0 : volume}
-                  onChange={handleVolumeSliderChange}
-                  className="shorts-header__volume-slider"
-                  aria-label="音量调节"
-                />
-              </div>
-            )}
-            <button
-              type="button"
-              className="shorts-header__icon-btn"
-              aria-label={muted ? "取消静音" : "静音"}
-              onPointerDownCapture={stopHeaderControlPropagation}
-              onTouchStartCapture={stopHeaderControlPropagation}
-              onMouseDownCapture={stopHeaderControlPropagation}
-              onPointerDown={stopHeaderControlPropagation}
-              onTouchStart={stopHeaderControlPropagation}
-              onMouseDown={stopHeaderControlPropagation}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleVolumeButtonClick();
-              }}
-            >
-              {muted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
-            </button>
-          </div>
+          <button
+            type="button"
+            className="shorts-header__icon-btn"
+            aria-label={muted ? "取消静音" : "静音"}
+            onPointerDownCapture={stopHeaderControlPropagation}
+            onTouchStartCapture={stopHeaderControlPropagation}
+            onMouseDownCapture={stopHeaderControlPropagation}
+            onPointerDown={stopHeaderControlPropagation}
+            onTouchStart={stopHeaderControlPropagation}
+            onMouseDown={stopHeaderControlPropagation}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleMuteButtonClick();
+            }}
+          >
+            {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+          </button>
         </div>
       </header>
 
@@ -795,6 +811,12 @@ export default function ShortsPage() {
         <div key={hudText.id} className="shorts-hud-toast">
           {hudText.icon}
           <span>{hudText.text}</span>
+        </div>
+      )}
+
+      {isWindowsShortsPlatform && keyboardSeekPreview && (
+        <div className="shorts-keyboard-seek-time" aria-live="polite">
+          {formatClock(keyboardSeekPreview.currentTime)} / {formatClock(keyboardSeekPreview.duration)}
         </div>
       )}
 
@@ -851,9 +873,6 @@ export default function ShortsPage() {
                   : undefined
               }
               muted={muted}
-              volume={volume}
-              setMuted={setMuted}
-              setVolume={setVolume}
               videoRef={setVideoRef(index)}
               onLikeToggle={handleLikeToggle}
               hasLiked={hasLiked}
@@ -885,9 +904,6 @@ type SlideProps = {
   /** 持久 video 当前应移动到的 slide 插槽 */
   sharedVideoSlotRef?: (el: HTMLDivElement | null) => void;
   muted: boolean;
-  volume: number;
-  setMuted: (muted: boolean) => void;
-  setVolume: (volume: number) => void;
   videoRef: (el: HTMLVideoElement | null) => void;
   /**
    * 切换点赞。第二参数 true 表示点赞，false 表示取消。
@@ -933,9 +949,6 @@ function ShortsSlide({
   sharedVideoRef,
   sharedVideoSlotRef,
   muted,
-  volume,
-  setMuted,
-  setVolume,
   videoRef,
   onLikeToggle,
   hasLiked,
@@ -953,7 +966,6 @@ function ShortsSlide({
   const shouldLoadRef = useRef(shouldLoad);
   const shouldMountRef = useRef(shouldMount);
   const mutedRef = useRef(muted);
-  const volumeRef = useRef(volume);
   const hasStartedPlayingRef = useRef(false);
   const loopRestartPendingRef = useRef(false);
   const loopRestartAwaitingFrameRef = useRef(false);
@@ -969,7 +981,6 @@ function ShortsSlide({
   shouldLoadRef.current = shouldLoad;
   shouldMountRef.current = shouldMount;
   mutedRef.current = muted;
-  volumeRef.current = volume;
   const usesSharedVideo = Boolean(sharedVideoRef);
   const getVideoElement = useCallback(() => {
     if (sharedVideoRef) {
@@ -1140,7 +1151,7 @@ function ShortsSlide({
 
     const attemptPlay = () => {
       if (!canContinue() || !video.paused) return;
-      applyVideoAudioState(video, mutedRef.current, volumeRef.current);
+      applyVideoMutedState(video, mutedRef.current);
       video.playsInline = true;
       try {
         video.defaultMuted = mutedRef.current;
@@ -1255,7 +1266,7 @@ function ShortsSlide({
     const attemptRestart = (attempt: number) => {
       if (!canContinueRestart(attempt)) return;
       normalizeVideoPlaybackRate(video);
-      applyVideoAudioState(video, mutedRef.current, volumeRef.current);
+      applyVideoMutedState(video, mutedRef.current);
 
       let request: Promise<void> | undefined;
       try {
@@ -1442,13 +1453,13 @@ function ShortsSlide({
     }
   }, [isActive, resetLoopRestartState, usesSharedVideo]);
 
-  // Sync volume state directly
+  // 只同步静音；媒体音量保持浏览器默认值，由系统控制实际响度。
   useEffect(() => {
     const video = getVideoElement();
     if (video && isActive) {
-      applyVideoAudioState(video, muted, volume);
+      applyVideoMutedState(video, muted);
     }
-  }, [getVideoElement, muted, volume, isActive]);
+  }, [getVideoElement, muted, isActive]);
 
   // 离开活跃或者被隐藏时暂停视频
   useEffect(() => {
@@ -1615,18 +1626,6 @@ function ShortsSlide({
         onSourceCached(item.id);
       }
     };
-    const handleVolumeChange = () => {
-      if (!belongsToSlide()) return;
-      if (!isActive) return;
-      // 当检测到 video 自身的 mute 状态或 volume 改变时，同步更新 React 状态。
-      // 这可以在移动端浏览器支持物理音量键调整时，自动反向取消静音并展示音量 HUD。
-      if (video.muted !== muted) {
-        setMuted(video.muted);
-      }
-      if (video.volume !== volume) {
-        setVolume(video.volume);
-      }
-    };
     const handlePlay = () => {
       if (!belongsToSlide()) return;
       if (!isActive) return;
@@ -1718,7 +1717,6 @@ function ShortsSlide({
     video.addEventListener("playing", handlePlaying);
     video.addEventListener("canplay", handleCanPlay);
     video.addEventListener("progress", handleProgress);
-    video.addEventListener("volumechange", handleVolumeChange);
     video.addEventListener("play", handlePlay);
     video.addEventListener("pause", handlePause);
     video.addEventListener("loadstart", handleLoadStart);
@@ -1738,7 +1736,6 @@ function ShortsSlide({
       video.removeEventListener("playing", handlePlaying);
       video.removeEventListener("canplay", handleCanPlay);
       video.removeEventListener("progress", handleProgress);
-      video.removeEventListener("volumechange", handleVolumeChange);
       video.removeEventListener("play", handlePlay);
       video.removeEventListener("pause", handlePause);
       video.removeEventListener("loadstart", handleLoadStart);
@@ -1754,18 +1751,14 @@ function ShortsSlide({
     isActive,
     isVideoPausedByUser,
     item.id,
-    muted,
     onActiveNeedsPriority,
     onActiveReadyForPreload,
     onSourceCached,
     resetLoopRestartState,
-    setMuted,
     setIsBuffering,
-    setVolume,
     shouldLoad,
     shouldMount,
     usesSharedVideo,
-    volume,
   ]);
 
   // Safari 15.4+ 可以在视频帧真正送到合成器时回调。iOS 共享 video 的
@@ -2479,6 +2472,14 @@ function ShortsSlide({
         </div>
       )}
 
+      {/* 移动端左右滑动 / 拖动进度时的时间提示。独立于底部进度条，
+          这样可以在触屏设备上放到页面顶部且不受底部容器定位限制。 */}
+      {scrubbing && isActive && shouldLoad && !isMarkedHidden && (
+        <div className="shorts-slide__progress-time" aria-live="polite">
+          {formatClock(currentTime)} / {formatClock(duration)}
+        </div>
+      )}
+
       {/* 进度条 */}
       {isActive && shouldLoad && !isMarkedHidden && (
         <div
@@ -2503,11 +2504,6 @@ function ShortsSlide({
               style={{ width: `${progressRatio * 100}%` }}
             />
           </div>
-          {scrubbing && (
-            <div className="shorts-slide__progress-time">
-              {formatClock(currentTime)} / {formatClock(duration)}
-            </div>
-          )}
         </div>
       )}
     </article>
@@ -2544,23 +2540,7 @@ function ShortsLoadingSpinner({ size }: { size: number }) {
   );
 }
 
-function applyVideoAudioState(
-  video: HTMLVideoElement,
-  nextMuted: boolean,
-  nextVolume: number
-) {
-  const safeVolume = clamp(nextVolume, 0, 1);
-  const syncVolume = () => {
-    try {
-      if (Math.abs(video.volume - safeVolume) > 0.001) {
-        video.volume = safeVolume;
-      }
-    } catch {
-      // Some mobile browsers expose volume as effectively read-only.
-    }
-  };
-
-  if (!nextMuted) syncVolume();
+function applyVideoMutedState(video: HTMLVideoElement, nextMuted: boolean) {
   try {
     if (video.muted !== nextMuted) {
       video.muted = nextMuted;
@@ -2568,7 +2548,6 @@ function applyVideoAudioState(
   } catch {
     // ignore
   }
-  if (nextMuted) syncVolume();
 }
 
 function releaseVideoSource(video: HTMLVideoElement) {
