@@ -123,15 +123,15 @@ test("shorts preserves a user pause while the active video is still loading", ()
   );
   assert.match(
     shortsPageSource,
-    /userPausedIndexRef\.current === videoIndex \|\|\s*\(activeVideo\.paused && activeVideo\.readyState >= 3\)/
+    /userPausedIndexRef\.current === target\.videoIndex \|\|\s*\(target\.video\.paused && target\.video\.readyState >= 3\)/
   );
   assert.match(
     shortsPageSource,
-    /setUserPausedForIndex\(videoIndex, false\);\s*activeVideo\.play\(\)\.catch/
+    /setUserPausedForIndex\(target\.videoIndex, false\);\s*target\.video\.play\(\)\.catch/
   );
   assert.match(
     shortsPageSource,
-    /setUserPausedForIndex\(videoIndex, true\);\s*activeVideo\.pause\(\);/
+    /setUserPausedForIndex\(target\.videoIndex, true\);\s*target\.video\.pause\(\);/
   );
   assert.match(
     shortsPageSource,
@@ -171,6 +171,55 @@ test("shorts keyboard play pause does not show a toast", () => {
   const keyboardBlock = /else if \(e\.key === " "\) \{[\s\S]*?\} else if \(e\.key === "m"/.exec(shortsPageSource);
   assert.ok(keyboardBlock, "space key handler should be present");
   assert.doesNotMatch(keyboardBlock[0], /showHud\("播放"|showHud\("暂停"/);
+});
+
+test("shorts double space likes without toggling playback", () => {
+  assert.match(shortsPageSource, /const SHORTS_KEYBOARD_DOUBLE_SPACE_MS = 280;/);
+  assert.match(
+    shortsPageSource,
+    /let pendingSpaceTimer: number \| null = null;[\s\S]*?let pendingSpaceTarget:/
+  );
+  assert.match(
+    shortsPageSource,
+    /pendingSpaceTimer = window\.setTimeout\(\(\) => \{[\s\S]*?toggleKeyboardPlayback\(target\);[\s\S]*?SHORTS_KEYBOARD_DOUBLE_SPACE_MS/
+  );
+  assert.match(
+    shortsPageSource,
+    /pendingSpaceTimer !== null &&[\s\S]*?pendingSpaceTarget\.video === activeVideo[\s\S]*?clearKeyboardSpaceTimer\(\);[\s\S]*?likeActiveVideo\(videoIndex\);[\s\S]*?return;/
+  );
+  assert.match(
+    shortsPageSource,
+    /const keyboardLikeHandlersRef = useRef<Map<number, \(\) => void>>\(new Map\(\)\);/
+  );
+  assert.match(
+    shortsPageSource,
+    /const likeActiveVideo = \(videoIndex: number\) => \{\s*keyboardLikeHandlersRef\.current\.get\(videoIndex\)\?\.\(\);/
+  );
+  assert.match(
+    shortsPageSource,
+    /registerKeyboardLikeHandler=\{registerKeyboardLikeHandler\}/
+  );
+  assert.match(
+    shortsPageSource,
+    /keyboardLikeHandlerRef\.current = \(\) => \{[\s\S]*?slideRef\.current\?\.getBoundingClientRect\(\);[\s\S]*?handleDoubleClickLike\(slideRect\.width \/ 2, slideRect\.height \/ 2\);/
+  );
+  assert.match(
+    shortsPageSource,
+    /registerKeyboardLikeHandler\(index, handleKeyboardLike\);[\s\S]*?registerKeyboardLikeHandler\(index, null\);/
+  );
+  assert.doesNotMatch(shortsPageSource, /new MouseEvent\("click"/);
+  assert.match(shortsPageSource, /data-shorts-like=""/);
+  assert.match(
+    shortsPageSource,
+    /window\.removeEventListener\("blur", handleWindowBlur\);[\s\S]*?clearKeyboardSpaceTimer\(\);/
+  );
+});
+
+test("shorts keeps the full heart animation when reduced motion is enabled", () => {
+  assert.match(
+    shortsCssSource,
+    /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.shorts-slide__heart-burst\s*\{\s*animation:\s*shorts-heart-pop 650ms cubic-bezier\(0\.175,\s*0\.885,\s*0\.32,\s*1\.275\) forwards !important;/
+  );
 });
 
 test("desktop held arrow-key seeking previews progress and commits once", () => {
@@ -336,6 +385,54 @@ test("shorts distinguishes feed failures from a genuinely empty library", () => 
   assert.doesNotMatch(
     videosDataSource,
     /\.catch\(\(\) => \(\{ items: \[\], total: 0/
+  );
+});
+
+test("shorts empty library reuses the homepage empty visual", () => {
+  assert.match(
+    shortsPageSource,
+    /import \{ AdminEmptyVisual \} from "@\/admin\/AdminEmptyVisual";/
+  );
+  assert.match(
+    shortsPageSource,
+    /\{empty && items\.length === 0 && \([\s\S]*?<AdminEmptyVisual[\s\S]*?variant="empty"[\s\S]*?text="当前库中没有视频"[\s\S]*?className="shorts-empty__visual"/
+  );
+  assert.match(
+    shortsPageSource,
+    /className="shorts-header__actions">\s*\{items\.length > 0 && \(/
+  );
+  assert.doesNotMatch(shortsPageSource, /当前没有可播放的视频/);
+  assert.match(
+    shortsCssSource,
+    /\.shorts-empty__visual \.admin-empty-visual__text\s*\{[^}]*color:\s*rgba\(255,\s*255,\s*255,\s*0\.72\);/
+  );
+});
+
+test("shorts hidden overlay keeps only the concise confirmation", () => {
+  assert.match(shortsPageSource, /shorts-slide__hidden-title">已隐藏该视频/);
+  assert.doesNotMatch(
+    shortsPageSource,
+    /系统将不会再次在任何地方向您展示此视频|shorts-slide__hidden-desc/
+  );
+  assert.doesNotMatch(shortsCssSource, /\.shorts-slide__hidden-desc/);
+});
+
+test("shorts hide action is icon-only and advances without a toast", () => {
+  assert.match(
+    shortsPageSource,
+    /aria-label="不再展示"[\s\S]*?<EyeOff size=\{22\} \/>/
+  );
+  assert.doesNotMatch(
+    shortsPageSource,
+    /<span className="shorts-slide__action-count">隐藏<\/span>/
+  );
+  assert.doesNotMatch(
+    shortsPageSource,
+    /已选择不再展示，正在滑至下一首/
+  );
+  assert.match(
+    shortsPageSource,
+    /const handleHideSuccess = useCallback\(\(idx: number\) => \{[\s\S]*?nextSlide\.scrollIntoView\(\{ behavior: "smooth" \}\);[\s\S]*?\}, \[items\.length\]\);/
   );
 });
 

@@ -23,6 +23,7 @@ import {
   type ShortsFeedItem,
   type ShortsItem,
 } from "@/data/videos";
+import { AdminEmptyVisual } from "@/admin/AdminEmptyVisual";
 import { useAuth } from "@/admin/AuthContext";
 import "@/styles/shorts.css";
 
@@ -70,6 +71,7 @@ const SHORTS_KEYBOARD_SEEK_SECONDS = 5;
 // 浏览器失焦时可能收不到 keyup；最后一次重复按键后自动提交，避免目标悬空。
 const SHORTS_KEYBOARD_SEEK_IDLE_COMMIT_MS = 1500;
 const SHORTS_KEYBOARD_SEEK_RELEASE_HIDE_MS = 400;
+const SHORTS_KEYBOARD_DOUBLE_SPACE_MS = 280;
 
 type ShortsKeyboardSeekKey = "ArrowLeft" | "ArrowRight";
 
@@ -227,6 +229,17 @@ export default function ShortsPage() {
   const videoRefCallbacks = useRef<
     Map<number, (el: HTMLVideoElement | null) => void>
   >(new Map());
+  const keyboardLikeHandlersRef = useRef<Map<number, () => void>>(new Map());
+  const registerKeyboardLikeHandler = useCallback(
+    (index: number, handler: (() => void) | null) => {
+      if (handler) {
+        keyboardLikeHandlersRef.current.set(index, handler);
+      } else {
+        keyboardLikeHandlersRef.current.delete(index);
+      }
+    },
+    []
+  );
   const iosSharedVideoRef = useRef<HTMLVideoElement | null>(null);
   const iosSharedVideoSlots = useRef<Map<number, HTMLDivElement>>(new Map());
   const iosSharedVideoSlotCallbacks = useRef<
@@ -611,6 +624,12 @@ export default function ShortsPage() {
 
   // 键盘快捷键监听
   useEffect(() => {
+    let pendingSpaceTimer: number | null = null;
+    let pendingSpaceTarget: {
+      videoIndex: number;
+      video: HTMLVideoElement;
+    } | null = null;
+
     const clearKeyboardSeekCommitTimer = () => {
       if (keyboardSeekCommitTimerRef.current === null) return;
       window.clearTimeout(keyboardSeekCommitTimerRef.current);
@@ -632,6 +651,59 @@ export default function ShortsPage() {
         return iosSharedVideoRef.current ?? undefined;
       }
       return videoRefs.current.get(videoIndex);
+    };
+
+    const clearKeyboardSpaceTimer = () => {
+      if (pendingSpaceTimer !== null) {
+        window.clearTimeout(pendingSpaceTimer);
+      }
+      pendingSpaceTimer = null;
+      pendingSpaceTarget = null;
+    };
+
+    const getActiveLikeButton = (videoIndex: number) =>
+      containerRef.current?.querySelector<HTMLButtonElement>(
+        `[data-index="${videoIndex}"] [data-shorts-like]`
+      ) ?? null;
+
+    const likeActiveVideo = (videoIndex: number) => {
+      keyboardLikeHandlersRef.current.get(videoIndex)?.();
+    };
+
+    const toggleKeyboardPlayback = (target: {
+      videoIndex: number;
+      video: HTMLVideoElement;
+    }) => {
+      if (
+        activeIndexRef.current !== target.videoIndex ||
+        getCurrentVideoAtIndex(target.videoIndex) !== target.video
+      ) {
+        return;
+      }
+
+      const shouldResume =
+        userPausedIndexRef.current === target.videoIndex ||
+        (target.video.paused && target.video.readyState >= 3);
+      if (shouldResume) {
+        setUserPausedForIndex(target.videoIndex, false);
+        target.video.play().catch(() => undefined);
+      } else {
+        setUserPausedForIndex(target.videoIndex, true);
+        target.video.pause();
+      }
+    };
+
+    const scheduleKeyboardSpaceToggle = (
+      videoIndex: number,
+      video: HTMLVideoElement
+    ) => {
+      pendingSpaceTarget = { videoIndex, video };
+      pendingSpaceTimer = window.setTimeout(() => {
+        const target = pendingSpaceTarget;
+        pendingSpaceTimer = null;
+        pendingSpaceTarget = null;
+        if (target) toggleKeyboardPlayback(target);
+      }, SHORTS_KEYBOARD_DOUBLE_SPACE_MS);
     };
 
     const discardKeyboardSeek = () => {
@@ -755,18 +827,23 @@ export default function ShortsPage() {
         if (e.repeat) return;
         const videoIndex = activeIndexRef.current;
         const activeVideo = getCurrentVideoAtIndex(videoIndex);
-        if (activeVideo) {
-          const shouldResume =
-            userPausedIndexRef.current === videoIndex ||
-            (activeVideo.paused && activeVideo.readyState >= 3);
-          if (shouldResume) {
-            setUserPausedForIndex(videoIndex, false);
-            activeVideo.play().catch(() => undefined);
-          } else {
-            setUserPausedForIndex(videoIndex, true);
-            activeVideo.pause();
-          }
+        if (!activeVideo) {
+          clearKeyboardSpaceTimer();
+          return;
         }
+
+        if (
+          pendingSpaceTimer !== null &&
+          pendingSpaceTarget?.videoIndex === videoIndex &&
+          pendingSpaceTarget.video === activeVideo
+        ) {
+          clearKeyboardSpaceTimer();
+          likeActiveVideo(videoIndex);
+          return;
+        }
+
+        clearKeyboardSpaceTimer();
+        scheduleKeyboardSpaceToggle(videoIndex, activeVideo);
       } else if (e.key === "m" || e.key === "M") {
         e.preventDefault();
         finishKeyboardSeek();
@@ -776,10 +853,7 @@ export default function ShortsPage() {
         e.preventDefault();
         finishKeyboardSeek();
         if (e.repeat) return;
-        const heartBtn = containerRef.current?.querySelector(`[data-index="${activeIndexRef.current}"] .shorts-slide__action`) as HTMLButtonElement | null;
-        if (heartBtn) {
-          heartBtn.click();
-        }
+        getActiveLikeButton(activeIndexRef.current)?.click();
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
         previewKeyboardSeek(
@@ -805,18 +879,26 @@ export default function ShortsPage() {
     };
 
     const handleVisibilityChange = () => {
-      if (document.hidden) finishKeyboardSeek();
+      if (!document.hidden) return;
+      finishKeyboardSeek();
+      clearKeyboardSpaceTimer();
+    };
+
+    const handleWindowBlur = () => {
+      finishKeyboardSeek();
+      clearKeyboardSpaceTimer();
     };
 
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
-    window.addEventListener("blur", finishKeyboardSeek);
+    window.addEventListener("blur", handleWindowBlur);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
-      window.removeEventListener("blur", finishKeyboardSeek);
+      window.removeEventListener("blur", handleWindowBlur);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      clearKeyboardSpaceTimer();
     };
   }, [
     isWindowsShortsPlatform,
@@ -984,7 +1066,6 @@ export default function ShortsPage() {
   }, [useDocumentScroll]);
 
   const handleHideSuccess = useCallback((idx: number) => {
-    showHud("已选择不再展示，正在滑至下一首...", <EyeOff size={16} />);
     const nextIdx = idx + 1;
     if (nextIdx < items.length) {
       setTimeout(() => {
@@ -994,7 +1075,7 @@ export default function ShortsPage() {
         }
       }, 700);
     }
-  }, [items.length, showHud]);
+  }, [items.length]);
 
   const videoWindow = getVideoWindowBounds(cacheWindowHighIndex, items.length);
 
@@ -1012,23 +1093,25 @@ export default function ShortsPage() {
           <ChevronLeft size={22} />
         </Link>
         <div className="shorts-header__actions">
-          <button
-            type="button"
-            className="shorts-header__icon-btn"
-            aria-label={muted ? "取消静音" : "静音"}
-            onPointerDownCapture={stopHeaderControlPropagation}
-            onTouchStartCapture={stopHeaderControlPropagation}
-            onMouseDownCapture={stopHeaderControlPropagation}
-            onPointerDown={stopHeaderControlPropagation}
-            onTouchStart={stopHeaderControlPropagation}
-            onMouseDown={stopHeaderControlPropagation}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleMuteButtonClick();
-            }}
-          >
-            {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-          </button>
+          {items.length > 0 && (
+            <button
+              type="button"
+              className="shorts-header__icon-btn"
+              aria-label={muted ? "取消静音" : "静音"}
+              onPointerDownCapture={stopHeaderControlPropagation}
+              onTouchStartCapture={stopHeaderControlPropagation}
+              onMouseDownCapture={stopHeaderControlPropagation}
+              onPointerDown={stopHeaderControlPropagation}
+              onTouchStart={stopHeaderControlPropagation}
+              onMouseDown={stopHeaderControlPropagation}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleMuteButtonClick();
+              }}
+            >
+              {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+            </button>
+          )}
         </div>
       </header>
 
@@ -1073,12 +1156,11 @@ export default function ShortsPage() {
 
         {empty && items.length === 0 && (
           <div className="shorts-empty">
-            <div className="shorts-empty__content">
-              <p>当前没有可播放的视频</p>
-              <Link to="/" className="shorts-empty__link">
-                返回首页
-              </Link>
-            </div>
+            <AdminEmptyVisual
+              variant="empty"
+              text="当前库中没有视频"
+              className="shorts-empty__visual"
+            />
           </div>
         )}
 
@@ -1133,6 +1215,7 @@ export default function ShortsPage() {
               videoRef={setVideoRef(index)}
               onLikeToggle={handleLikeToggle}
               hasLiked={hasLiked}
+              registerKeyboardLikeHandler={registerKeyboardLikeHandler}
               canHide={isAdmin}
               onHideSuccess={handleHideSuccess}
               onActiveReadyForPreload={handleActiveReadyForPreload}
@@ -1189,6 +1272,11 @@ type SlideProps = {
   onLikeToggle: (videoId: string, liked: boolean) => Promise<number | null>;
   /** 父组件查询某 id 是否已经在本次会话内点过赞 */
   hasLiked: (videoId: string) => boolean;
+  /** 注册该 slide 的键盘点赞入口，供父级双空格快捷键直接调用。 */
+  registerKeyboardLikeHandler: (
+    index: number,
+    handler: (() => void) | null
+  ) => void;
   canHide: boolean;
   onHideSuccess: (index: number) => void;
   onActiveReadyForPreload: (index: number) => void;
@@ -1230,6 +1318,7 @@ function ShortsSlide({
   videoRef,
   onLikeToggle,
   hasLiked,
+  registerKeyboardLikeHandler,
   canHide,
   onHideSuccess,
   onActiveReadyForPreload,
@@ -1239,7 +1328,9 @@ function ShortsSlide({
   isVideoPausedByUser,
   showHud,
 }: SlideProps) {
+  const slideRef = useRef<HTMLElement | null>(null);
   const localRef = useRef<HTMLVideoElement | null>(null);
+  const keyboardLikeHandlerRef = useRef<() => void>(() => undefined);
   const isActiveRef = useRef(isActive);
   const shouldLoadRef = useRef(shouldLoad);
   const shouldMountRef = useRef(shouldMount);
@@ -2470,6 +2561,19 @@ function ShortsSlide({
     });
   }
 
+  keyboardLikeHandlerRef.current = () => {
+    if (!isActiveRef.current || isMarkedHidden) return;
+    const slideRect = slideRef.current?.getBoundingClientRect();
+    if (!slideRect) return;
+    handleDoubleClickLike(slideRect.width / 2, slideRect.height / 2);
+  };
+
+  useEffect(() => {
+    const handleKeyboardLike = () => keyboardLikeHandlerRef.current();
+    registerKeyboardLikeHandler(index, handleKeyboardLike);
+    return () => registerKeyboardLikeHandler(index, null);
+  }, [index, registerKeyboardLikeHandler]);
+
   /**
    * 点击右下角心形按钮：在"已点赞 / 未点赞"之间切换。
    */
@@ -2617,6 +2721,7 @@ function ShortsSlide({
 
   return (
     <article
+      ref={slideRef}
       className="shorts-slide"
       data-shorts-slide=""
       data-index={index}
@@ -2686,9 +2791,8 @@ function ShortsSlide({
       {/* 不再展示屏蔽遮罩 */}
       {isMarkedHidden && (
         <div className="shorts-slide__hidden-overlay" onClick={(e) => e.stopPropagation()}>
-          <EyeOff size={38} style={{ color: "#ff4060", marginBottom: "8px" }} />
+          <EyeOff size={38} style={{ color: "#ff4060" }} />
           <div className="shorts-slide__hidden-title">已隐藏该视频</div>
-          <div className="shorts-slide__hidden-desc">系统将不会再次在任何地方向您展示此视频</div>
         </div>
       )}
 
@@ -2729,6 +2833,7 @@ function ShortsSlide({
         {/* 点赞 */}
         <button
           type="button"
+          data-shorts-like=""
           className={`shorts-slide__action ${isLiked ? "is-liked" : ""}`}
           aria-label={isLiked ? "取消点赞" : "点赞"}
           aria-pressed={isLiked}
@@ -2752,7 +2857,6 @@ function ShortsSlide({
             onClick={handleHideClick}
           >
             <EyeOff size={22} />
-            <span className="shorts-slide__action-count">隐藏</span>
           </button>
         )}
       </aside>
